@@ -20,6 +20,8 @@
 #include <stdio.h>  
 #include <stddef.h>  
 #include <sys/socket.h>  
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <sys/un.h>  
 #include <errno.h>  
 #include <string.h>  
@@ -34,12 +36,15 @@
 #define READER_MAX_NUM  10
 #define TAG_MAX_NUM  10
 
-#define DISCOVERY_REQUEST   1
-#define QUERY_REQUEST   2
-#define QUERY_REQUEST_ACK   3
-#define QUERY_REQUEST_NACK  4
-#define QUERY_REQUEST_CACK  5
 
+#define DISCOVERY_REQUEST           0
+#define DISCOVERY_REQUEST_ACK       1
+#define DISCOVERY_REQUEST_NACK      2
+#define DISCOVERY_REQUEST_CACK      3
+#define QUERY_REQUEST       4
+#define QUERY_REQUEST_ACK   5
+#define QUERY_REQUEST_NACK  6
+#define QUERY_REQUEST_CACK  7
 
 typedef struct{
     char reader;
@@ -48,6 +53,7 @@ typedef struct{
 
 typedef struct{
     char src;
+    char ack;
     char type;
     char dst;
     char collision_num;
@@ -96,11 +102,32 @@ tag_t tag_item_table[TAG_MAX_NUM];
 char *server_path = "server.socket";  
 
 
-int reader_num = 2;
-int tag_num = 4;
+
+
+int reader_num;
+int tag_num;
 
 
 int server_listen() {  
+#if 0
+    int listenfd = 0, connfd = 0;
+    struct sockaddr_in serv_addr; 
+
+
+    listenfd = socket(AF_INET, SOCK_STREAM, 0);
+    memset(&serv_addr, '0', sizeof(serv_addr));
+
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    serv_addr.sin_port = htons(5000); 
+
+    bind(listenfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)); 
+
+    listen(listenfd, 10); 
+
+	return listenfd;
+
+#else
 	int fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if(fd < 0){
         perror("create sock fail:");
@@ -117,6 +144,7 @@ int server_listen() {
         perror("listen fail:");
     }
 	return fd;
+#endif
 }
 
 int simulator_server(){         //tag is server, reader is client.
@@ -137,27 +165,34 @@ int simulator_server(){         //tag is server, reader is client.
 }
 
 int recv_from_reader(){
-    fd_set fds;
-    FD_ZERO(&fds);
-    int max_fd = -1;
-    for(int i = 0; i < tag_num; i++){
-        for(int j = 0; j < reader_num; j++){
-            max_fd = max_fd > tag_item_table[i].reader[j].conn ? max_fd : tag_item_table[i].reader[j].conn;
-            FD_SET(tag_item_table[i].reader[j].conn, &fds);
-        }
-    }
     int recv_flag = 0;
     while(1){    
+        fd_set fds;
+        FD_ZERO(&fds);
+        int max_fd = -1;
+        for(int i = 0; i < tag_num; i++){
+            for(int j = 0; j < reader_num; j++){
+                max_fd = max_fd > tag_item_table[i].reader[j].conn ? max_fd : tag_item_table[i].reader[j].conn;
+                FD_SET(tag_item_table[i].reader[j].conn, &fds);
+            }
+        }
+
         struct timeval tv; 
         tv.tv_sec = 1;
         tv.tv_usec = 0;
-        int ret = select(max_fd, &fds, NULL, NULL, &tv);
-        printf("[%s] ret:%d\n", __func__, ret);
+        int ret = select(max_fd+1, &fds, NULL, NULL, &tv);
+//        printf("[%s] ret:%d\n", __func__, ret);
         if(ret > 0){ 
             for(int i = 0; i < tag_num; i++){
                 for(int j = 0; j < reader_num; j++){
                     if(FD_ISSET(tag_item_table[i].reader[j].conn, &fds)){
+//                        printf("recv_fd:%d\n", tag_item_table[i].reader[j].conn);
                         tag_item_table[i].reader[j].rxbuflen = read(tag_item_table[i].reader[j].conn, tag_item_table[i].reader[j].rxbuf, FRAME_MAX_LEN);
+                        printf("rxbuf: ");
+                        for(int k = 0; k < tag_item_table[i].reader[j].rxbuflen; k++){
+                            printf("%02x ", tag_item_table[i].reader[j].rxbuf[k]);
+                        }
+                        printf("\n");
                     }
                 }
             }
@@ -174,23 +209,14 @@ int recv_from_reader(){
 
 
 //the identification is UUID, not addr.
-void keep_silent(int tag_addr, int reader_addr){
-    for(int i = 0; i < tag_num; i++){
-        if(tag_item_table[i].addr == tag_addr){
-            tag_item_table[i].silent[tag_item_table[i].silent_num++] = reader_addr;
-            break;
-        }
-    }
+void keep_silent(int id, int reader_addr){
+    tag_item_table[id].silent[tag_item_table[id].silent_num++] = reader_addr;
 }
 
-int is_silent(int tag_addr, int reader_addr){
-    for(int i = 0; i < tag_num; i++){
-        if(tag_item_table[i].addr == tag_addr){
-            for(int j = 0; j < tag_item_table[i].silent_num; j++){
-                if(tag_item_table[i].silent[j] == reader_addr){
-                    return 1;
-                }
-            }
+int is_silent(int id, int reader_addr){
+    for(int i = 0; i < tag_item_table[id].silent_num; i++){
+        if(tag_item_table[id].silent[i] == reader_addr){
+            return 1;
         }
     }
     return 0;
@@ -210,32 +236,34 @@ void parse_downlink(){
     deframe();
     for(int i = 0; i < tag_num; i++){
         for(int j = 0; j < reader_num; j++){
-            if(tag_item_table[i].reader[j].downlink_frame.type == DISCOVERY_REQUEST){       //ACK last tag, block ack for other readers' tags. Assign address for tags haven't been discovered yet.
+            printf("type:%d\n", tag_item_table[i].reader[j].downlink_frame.type);
+            if((tag_item_table[i].reader[j].downlink_frame.type & 0x04) == DISCOVERY_REQUEST){       //ACK last tag, block ack for other readers' tags. Assign address for tags haven't been discovered yet.
                 printf("[%s]---recv DISCOVERY REQUEST\n", __func__);
-
-                for(int k = 0; k < tag_item_table[i].alias_num; k++){
+                
+                for(int k = 0; k < tag_item_table[i].alias_num; k++){       //ACK
                     if(tag_item_table[i].alias[k].reader == tag_item_table[i].reader[j].downlink_frame.src &&
                     tag_item_table[i].alias[k].tag == tag_item_table[i].reader[j].downlink_frame.dst){     //ACK last tag
-                        keep_silent(tag_item_table[i].addr, tag_item_table[i].reader[j].downlink_frame.src);
+                        keep_silent(i, tag_item_table[i].reader[j].downlink_frame.src);
                     }
                     for(int m = 0; m < tag_item_table[i].reader[j].downlink_frame.addr_pair_num; m++){      //block ack
                         if(tag_item_table[i].alias[k].reader == tag_item_table[i].reader[j].downlink_frame.addr_pair[m].reader &&
                         tag_item_table[i].alias[k].tag == tag_item_table[i].reader[j].downlink_frame.addr_pair[m].tag){
-                            keep_silent(tag_item_table[i].addr, tag_item_table[i].reader[j].downlink_frame.src);
+                            keep_silent(i, tag_item_table[i].reader[j].downlink_frame.src);
                         }
                     }
                 }
 
-
-                if(!is_silent(tag_item_table[i].addr, tag_item_table[i].reader[j].downlink_frame.src)){ //has been acked.
+                if(is_silent(i, tag_item_table[i].reader[j].downlink_frame.src)){ //has been acked.
                     //do nothing
-                }else{
+                }else{                                                      //DISCOVERY REQUEST
                     tag_item_table[i].reader[j].downlink_frame.collision_num = (tag_item_table[i].reader[j].rxbuf[2] >> 4);
                     tag_item_table[i].reader[j].downlink_frame.plen = (tag_item_table[i].reader[j].rxbuf[2] & 0x0F);                
+                    printf("collision_num:%d\n", tag_item_table[i].reader[j].downlink_frame.collision_num);
                     if(tag_item_table[i].reader[j].downlink_frame.collision_num == 0){
                         tag_item_table[i].addr = 0;
                     }else{
                         tag_item_table[i].addr = random()%(2*tag_item_table[i].reader[j].downlink_frame.collision_num);
+                        printf("addr:%d\n", tag_item_table[i].addr);
                     }
                     if(tag_item_table[i].addr == 0){    //prepare for uplink
                         tag_item_table[i].tx_ready = 1;
@@ -247,8 +275,8 @@ void parse_downlink(){
 
             }else{  //QUERY_REQUEST (ACK, NACK, CACK)
                 //keep silent for last tag
-                if(tag_item_table[i].reader[j].downlink_frame.type == QUERY_REQUEST_ACK){
-                    keep_silent(tag_item_table[i].reader[j].downlink_frame.dst - 1, tag_item_table[i].reader[j].downlink_frame.src);
+                if(tag_item_table[i].reader[j].downlink_frame.type == QUERY_REQUEST_ACK){                
+                    keep_silent(i, tag_item_table[i].reader[j].downlink_frame.src);
                 }
                 if(tag_item_table[i].reader[j].downlink_frame.dst == tag_item_table[i].addr){      //for me.
                     tag_item_table[i].uplink_frame.dst = tag_item_table[i].reader[j].downlink_frame.src;
@@ -265,7 +293,7 @@ void parse_downlink(){
 
 void enframe(){
     for(int i = 0; i < tag_num; i++){
-        if(tag_item_table[i].uplink_frame.dst > 0){
+        if(tag_item_table[i].tx_ready > 0){
             for(int j = 0; j < reader_num; j++){
                 tag_item_table[i].txbuf[0] = tag_item_table[i].uplink_frame.dst;
                 tag_item_table[i].txbuf[1] = (tag_item_table[i].uplink_frame.src << 4);
@@ -279,10 +307,11 @@ void enframe(){
 void send_to_reader(){
     enframe();
     for(int i = 0; i < tag_num; i++){
-        if(tag_item_table[i].uplink_frame.dst > 0){
+        if(tag_item_table[i].tx_ready){
             for(int j = 0; j < reader_num; j++){
-                 int sent_bytes = write(tag_item_table[i].reader[j].conn, tag_item_table[i].txbuf, FRAME_MAX_LEN);
+                 int sent_bytes = write(tag_item_table[i].reader[j].conn, tag_item_table[i].txbuf, tag_item_table[i].txbuflen);
                  if(sent_bytes == tag_item_table[i].txbuflen){ 
+                    printf("[%s]---sendfd:%d sent bytes:%d\n", __func__, tag_item_table[i].reader[j].conn, sent_bytes);
                  //send success.
                  }
             }
@@ -290,7 +319,18 @@ void send_to_reader(){
     }
 }
 
-void main(){
+void usage(char *prog){
+    printf("Usage:%s <reader_num> <tag_num>\n", prog);
+}
+
+int main(int argc, char *argv[]){
+    if(argc == 3){
+        reader_num = atoi(argv[1]);
+        tag_num = atoi(argv[2]);
+    }else{
+        usage(argv[0]);
+        return 0;
+    }
     srand(time(NULL));
     simulator_server();
     while(1){
@@ -299,5 +339,6 @@ void main(){
             send_to_reader();        
         }
     }    
+    return 0;
 }
 
