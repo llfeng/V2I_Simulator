@@ -32,6 +32,7 @@
 #include <unistd.h>  
 #include <fcntl.h>
 #include <time.h>
+#include <pthread.h>
 
 
 #define DOWN_SLOT_TIME   60
@@ -85,22 +86,51 @@ typedef struct{
 }uplink_frame_t;
 
 typedef struct{
-    int conn;
-    int rxbuflen;
-    char rxbuf[FRAME_MAX_LEN];
-    uplink_frame_t uplink_frame;
-}tag_t;
-
-typedef struct{
+    char conn;
     char addr;
+    char state;
+    char ack;
+    char query_addr;
+    char tag_addr_range;
+    char collision_num;
+    char plen;
+    char payload[PAYLOAD_MAX_LEN];
+    char pair_num;
+    addr_pair_t pair[TAG_MAX_NUM];
     downlink_frame_t downlink_frame;
-    tag_t tag[TAG_MAX_NUM];
     char txbuflen;
     char txbuf[FRAME_MAX_LEN];
     int start_time;
     int end_time;
     char last_query_addr;
 }reader_t;
+
+typedef struct{
+    int type;
+    int start_time;
+    int addr;
+    int response_reader;
+    int plen;
+    char payload[32];
+    
+}task_t;
+
+
+typedef struct{
+    int conn;
+    int vaild;
+    uint64_t start_time;
+    uint64_t end_time;
+    int addr;
+    int plen;
+    char payload[32];
+}reader_info_t;
+
+typedef struct{
+    int type;
+    int plen;
+    char payload[32];
+}proxy_msg_t;
 
 
 int reader_num;
@@ -110,51 +140,41 @@ reader_t reader_item_table[READER_MAX_NUM];
 
 
 
-#if 0
-char *server_ip = "127.0.0.1";
+char *reader_proxy_path = "reader_proxy.sock";
+char *simulator_server_path = "server.socket";
 
-int reader_fd_init(){
-    int fd = socket(AF_INET, SOCK_STREAM, 0); 
-
-    struct sockaddr_in addr;
+int unix_domain_server_init(char *path){
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0); 
+    if(fd < 0){ 
+        perror("create sock fail:");
+    }   
+    struct sockaddr_un addr;
     memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(5000);
-
-    inet_pton(AF_INET, server_ip, &addr.sin_addr);
-
-//    strncpy(addr.sun_path, server_path, sizeof(addr.sun_path)-1);
-    connect(fd, (struct sockaddr *)&addr, sizeof(addr));
-    return fd; 
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, path, sizeof(addr.sun_path)-1);
+    unlink(path);
+    if(bind(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0){ 
+        perror("bind fail:");
+    }   
+    if(listen(fd, 5) < 0){ 
+        perror("listen fail:");
+    }   
+    return fd;     
 }
-#else
-char *server_path = "server.socket";
 
-int reader_fd_init(){
+int unix_domain_client_init(char *path){
     int fd = socket(AF_UNIX, SOCK_STREAM, 0); 
     struct sockaddr_un addr;
     memset(&addr, 0, sizeof(addr));
 
     addr.sun_family = AF_UNIX;
 
-    strncpy(addr.sun_path, server_path, sizeof(addr.sun_path)-1);
+    strncpy(addr.sun_path, path, sizeof(addr.sun_path)-1);
 
     connect(fd, (struct sockaddr *)&addr, sizeof(addr));
     return fd; 
 }
 
-#endif
-
-
-
-
-void readers_connect(){
-    for(int i = 0; i < tag_num; i++){
-        for(int j = 0; j < reader_num; j++){
-            reader_item_table[j].tag[i].conn = reader_fd_init();             //[reader_seq][tag_seq]
-        }
-    }
-}
 
 int gen_start_time(){
     int slot_time = DOWN_SLOT_TIME;
@@ -180,26 +200,6 @@ void enframe_discovery(reader_t *reader){
     printf("\n");
 }
 
-void send_discovery_request(reader_t *reader){
-    enframe_discovery(reader);
-    for(int i = 0; i < tag_num; i++){
-        int sent_bytes = write(reader->tag[i].conn, reader->txbuf, reader->txbuflen);
-        if(sent_bytes == reader->txbuflen){
-            printf("send_conn:%d\n", reader->tag[i].conn);
-        }else{
-            printf("sent bytes:%d\n", sent_bytes);
-        }
-    }
-    reader->downlink_frame.collision_num = 0;
-}
-
-/* 
-void recv_discovery_ack(reader_t *reader){
-    for(int i = 0; i < tag_num; i++){
-        reader->tag[i].rxbuflen = read(reader->conn[i], reader->tag[i].rxbuf, FRAME_MAX_LEN);
-    }
-}
-*/
 
 void enframe_query(reader_t *reader){
     reader->txbuf[0] = reader->downlink_frame.src;
@@ -209,134 +209,20 @@ void enframe_query(reader_t *reader){
     reader->txbuflen = 2;
 }
 
-void send_query_request(reader_t *reader, int tag_addr){
-    reader->downlink_frame.dst = tag_addr;
-    enframe_query(reader);
-    for(int i = 0; i < tag_num; i++){
-        int sent_bytes = write(reader->tag[i].conn, reader->txbuf, reader->txbuflen);
-        if(sent_bytes == reader->txbuflen){
-            //send success.
-        }
-    }
-}
+reader_info_t *select_reader(reader_info_t *reader_item_table){
+    reader_info_t *reader_array[READER_MAX_NUM] = {NULL};
 
-void recv_from_tag(){
-    int recv_flag = 0;
-    while(1){
-        fd_set fds;
-        FD_ZERO(&fds);
-        int max_fd = -1;
-        for(int i = 0; i < reader_num; i++){
-            for(int j = 0; j < tag_num; j++){
-                max_fd = max_fd > reader_item_table[i].tag[j].conn ? max_fd : reader_item_table[i].tag[j].conn;
-                FD_SET(reader_item_table[i].tag[j].conn, &fds);
-            }
-        }
-
-        struct timeval tv;
-        tv.tv_sec = 1;
-        tv.tv_usec = 0;
-        int ret = select(max_fd+1, &fds, NULL, NULL, &tv);
-//        printf("[%s] ret:%d\n", __func__, ret);
-        if(ret > 0){
-            for(int i = 0; i < reader_num; i++){
-                for(int j = 0; j < tag_num; j++){
-                    if(FD_ISSET(reader_item_table[i].tag[j].conn, &fds)){
-                        reader_item_table[i].tag[j].rxbuflen = read(reader_item_table[i].tag[j].conn, reader_item_table[i].tag[j].rxbuf, FRAME_MAX_LEN);
-                    }
-                }
-            }
-            recv_flag = 1;            
-        }else{
-            if(recv_flag){
-                break;
-            }
-        }
-    }
-}
-
-void deframe(){
+    int active_reader_num = 0;
     for(int i = 0; i < reader_num; i++){
-        for(int j = 0; j < tag_num; j++){
-            reader_item_table[i].tag[j].uplink_frame.dst = reader_item_table[i].tag[j].rxbuf[0];
-            reader_item_table[i].tag[j].uplink_frame.src = (reader_item_table[i].tag[j].rxbuf[1] >> 4);
-            reader_item_table[i].tag[j].uplink_frame.plen = (reader_item_table[i].tag[j].rxbuf[1] & 0x0F);
+        if(reader_item_table[i].vaild){
+            reader_array[active_reader_num++] = &reader_item_table[i];
         }
     }
-}
 
-void parse_uplink(reader_t *reader){
-    //uplink collision.
-    deframe();
-
-    int collision_flag = 0;
-    int uplink_slot[TAG_MAX_NUM];
-    memset(uplink_slot, 0, sizeof(uplink_slot));
-    for(int i = 0; i < tag_num; i++){
-        uplink_slot[reader->tag[i].uplink_frame.src]++;     
-    }
-    for(int i = 0; i < tag_num; i++){
-        if(uplink_slot[i] > 1){
-            collision_flag = 1;
-            break;
-        }
-    }
-    
-    int recv_flag = 0;
-    //uplink work well.
-    if(!collision_flag){
-        for(int i = 0; i < reader_num; i++){
-            int addr_pair_index = reader_item_table[i].downlink_frame.addr_pair_num;
-            for(int j = 0; j < tag_num; j++){
-                if(reader_item_table[i].tag[j].uplink_frame.dst == reader->addr){    //for me
-                    reader->downlink_frame.src = reader->addr;
-                    //reader->downlink_frame.type = QUERY_REQUEST_ACK;
-                    reader->downlink_frame.ack = ACK;
-                    reader->downlink_frame.dst++;
-                    printf("ACK\n");
-                    //reader_item_table[i].last_query_addr++;
-                    recv_flag = 1;
-                }else{      //not for me, save address pair.
-                    reader_item_table[i].downlink_frame.addr_pair[addr_pair_index].reader = reader_item_table[i].tag[j].uplink_frame.dst;
-                    reader_item_table[i].downlink_frame.addr_pair[addr_pair_index].tag = reader_item_table[i].tag[j].uplink_frame.src;
-                    addr_pair_index++;
-                }
-            }
-            reader_item_table[i].downlink_frame.addr_pair_num = addr_pair_index;
-        }
-        if(recv_flag == 0){
-            reader->downlink_frame.src = reader->addr;
-            reader->downlink_frame.ack = NACK;
-            //reader->downlink_frame.type = QUERY_REQUEST_NACK;
-            reader->downlink_frame.dst++;
-            printf("NACK\n");
-//            reader->last_query_addr++;
-        }
-    }else{
-        reader->downlink_frame.src = reader->addr;
-        reader->downlink_frame.ack = CACK;
-        //reader->downlink_frame.type = QUERY_REQUEST_CACK;
-        reader->downlink_frame.collision_num++;
-        reader->downlink_frame.dst++;
-        reader->downlink_frame.dst &= 0x0F;
-        printf("CACK\n");
-
-//        reader->last_query_addr++;
-    }
-}
-
-
-reader_t *select_reader(){
-    reader_t *reader_array[READER_MAX_NUM] = {NULL};
-
-    for(int i = 0; i < reader_num; i++){
-        reader_array[i] = &reader_item_table[i];
-    }
-
-    reader_t *min = NULL;
-    for(int i = 0; i < reader_num; i++){
+    reader_info_t *min = NULL;
+    for(int i = 0; i < active_reader_num; i++){
         min = reader_array[i];
-        for(int j = i+1; j < reader_num; j++){            
+        for(int j = i+1; j < active_reader_num; j++){            
             if(reader_array[j]->start_time < min->start_time){
                 reader_array[i] = reader_array[j];        
                 reader_array[j] = min;
@@ -347,13 +233,13 @@ reader_t *select_reader(){
     
     int side_count = 0;
 
-    if(reader_num == 1){
+    if(active_reader_num == 1){
         return reader_array[0];
-    }else if(reader_num == 0){
+    }else if(active_reader_num == 0){
         return NULL;
     }
 
-    for(int i = 1; i < reader_num; i++){    
+    for(int i = 1; i < active_reader_num; i++){    
         if(i == 1){
             if(reader_array[0]->end_time < reader_array[i]->start_time){
                 return reader_array[0];
@@ -369,7 +255,7 @@ reader_t *select_reader(){
             return reader_array[i-1];
         }
 
-        if(i == reader_num){
+        if(i == active_reader_num){
             if(reader_array[i-1]->end_time < reader_array[i]->start_time){
                 return reader_array[i];
             }
@@ -387,18 +273,277 @@ void readers_init(){
         reader_item_table[i].downlink_frame.dst = 0x0F;
         reader_item_table[i].downlink_frame.collision_num = 0;
         reader_item_table[i].downlink_frame.plen = 0;
-/*
-        reader_item_table[i].txbuflen = 3;
-        reader_item_table[i].txbuf[0] = 0xA0+i;
-        reader_item_table[i].txbuf[1] = (DISCOVERY_REQUEST << 4);
-        reader_item_table[i].txbuf[1] += 0xF;
-        reader_item_table[i].txbuf[2] = 0;
-*/        
     }
 }
 
 void usage(char *prog){
     printf("Usage:%s <reader_num> <tag_num>\n", prog);
+}
+
+reader_t *create_reader(){
+    reader_t *reader = (reader_t *)malloc(sizeof(reader_t));
+    memset(reader, 0, sizeof(reader_t));
+    return reader;
+}
+
+void destroy_reader(reader_t *reader){
+    free(reader);
+}
+
+
+void downlink_collision_handler(reader_t *reader){
+//do nothing, just wait for retransmission
+}
+
+void uplink_collision_handler(reader_t *reader, task_t *task){
+    if(task->addr == reader->addr){ //for me
+        reader->collision_num++;
+        reader->query_addr++;
+        if(reader->query_addr == reader->tag_addr_range){
+            reader->state = DISCOVERY_REQUEST;            
+            reader->ack = CACK;
+            reader->query_addr = reader->tag_addr_range-1;            
+            if(reader->collision_num){
+                reader->tag_addr_range = 2*reader->collision_num;
+            }else{
+                reader->tag_addr_range = 1;
+            }
+        }else{
+            reader->state = QUERY_REQUEST;
+            reader->ack = CACK;            
+        }
+    }else{
+        //not for me, do nothing
+    }
+}
+
+void data_handler(reader_t *reader, task_t *task){
+    if(task->addr == reader->addr){
+        reader->query_addr++;
+        if(reader->query_addr == reader->tag_addr_range){
+            reader->state = DISCOVERY_REQUEST;
+            reader->ack = ACK;
+            reader->query_addr = reader->tag_addr_range-1;            
+            if(reader->collision_num){
+                reader->tag_addr_range = 2*reader->collision_num;
+            }else{
+                reader->tag_addr_range = 1;
+            }
+        }else{
+            reader->state = QUERY_REQUEST;
+            reader->ack = ACK;            
+        }
+    }
+}
+
+void uplink_idle_handler(reader_t *reader, task_t *task){
+    if(task->addr == reader->addr){
+        reader->query_addr++;
+        printf("---tag_range:%d\n", reader->tag_addr_range);
+        if(reader->query_addr == reader->tag_addr_range){
+            reader->state = DISCOVERY_REQUEST;
+            reader->ack = NACK;
+            reader->query_addr = reader->tag_addr_range-1;            
+            if(reader->collision_num){
+                reader->tag_addr_range = 2*reader->collision_num;
+            }else{
+                reader->tag_addr_range = 1;
+            }
+        }else{
+            reader->state = QUERY_REQUEST;
+            reader->ack = NACK;            
+        }
+
+    }
+}
+
+//如果有连续两个idle slot,就有可能发生downlink冲突(QUERY和DISCOVERY)
+
+
+void reader_init(reader_t *reader, int conn){
+    reader->conn = conn;
+    reader->addr = conn;
+    reader->state = DISCOVERY_REQUEST;
+    reader->ack = NACK;
+    reader->query_addr = 0;
+    reader->tag_addr_range = 1;
+    reader->collision_num = 0;
+    reader->pair_num = 0;
+    memset(reader->pair, 0, sizeof(reader->pair));
+    reader->plen = 0;
+    memset(reader->payload, 0, sizeof(reader->payload));
+}
+
+int enframe(reader_t *reader, char *txbuf){
+    int txbuflen = 0;
+    txbuf[0] = reader->addr;
+    txbuf[1] = ((reader->state + reader->ack) << 4);
+    txbuf[1] += reader->query_addr;
+    if(reader->state == DISCOVERY_REQUEST){
+        txbuf[2] = (reader->collision_num << 4);
+        txbuf[2] += reader->plen;
+        memcpy(&txbuf[3], reader->payload, reader->plen);
+        txbuflen = 3+reader->plen;
+        reader->collision_num = 0;
+    }else{
+        txbuflen = 2;
+    }
+    return txbuflen;
+}
+
+
+
+
+//Task define 
+#define ACTIVE              0
+#define UPLINK_COLLISION    1
+#define UPLINK_IDLE         2
+#define UPLINK_DATA         3
+#define DOWNLINK_COLLISION  4
+#define TRIGGER             5
+
+void *reader_thread(){
+    reader_t *reader = create_reader();
+    int conn = unix_domain_client_init(reader_proxy_path);
+    reader_init(reader, conn);
+
+    char txbuflen = 0;
+    char txbuf[FRAME_MAX_LEN];
+    memset(txbuf, 0, sizeof(txbuf));
+
+    printf("conn:%d\n", conn);
+
+    task_t *task = (task_t *)malloc(sizeof(task_t));
+    while(1){
+        memset(task, 0, sizeof(task_t));
+        int readlen = read(conn, (char *)task, sizeof(task_t));
+        printf("[%ld->>>>recv>>>", time(NULL));
+        if(task->type == DOWNLINK_COLLISION){
+            downlink_collision_handler(reader);
+        }else if(task->type == UPLINK_COLLISION){
+            printf("UPLINK_COLLISION>>>]\n");
+            uplink_collision_handler(reader, task);
+        }else if(task->type == UPLINK_DATA){
+            printf("UPLINK_DATA>>>]\n");
+            data_handler(reader, task);
+        }else if(task->type == TRIGGER){
+            printf("TRIGGER>>>]\n");
+            task->type = ACTIVE;
+            task->start_time = time(NULL) + gen_start_time();
+            task->addr = conn;
+            task->plen = enframe(reader, task->payload);        
+            write(conn, (char *)task, sizeof(task_t));        
+            if(reader->state == DISCOVERY_REQUEST){
+                reader->query_addr = 0;
+            }
+            printf("[%ld->>>>send>>>", time(NULL));
+            for(int i = 0; i < task->plen; i++){
+                printf(" %02x", task->payload[i]);
+            }
+            printf(">>>>]\n");
+        }else if(task->type == UPLINK_IDLE){
+            uplink_idle_handler(reader, task);
+            printf("UPLINK_IDLE>>>]\n");
+        }
+    }
+    destroy_reader(reader);
+}
+
+
+void trigger_reader(reader_info_t *reader_info){
+    task_t *task = (task_t *)malloc(sizeof(task_t));
+    memset(task, 0, sizeof(task_t));
+    task->type = TRIGGER;
+    for(int i = 0; i < reader_num; i++){
+        write(reader_info[i].conn, (char *)task, sizeof(task_t));
+    }
+    free(task);
+}
+
+
+
+//proxy define 
+#define COLLISION   1
+void *reader_proxy(){
+    reader_info_t reader_info[READER_MAX_NUM];
+    memset(reader_info, 0, sizeof(reader_info));
+	int local_serverfd = unix_domain_server_init(reader_proxy_path);
+    int remote_clientfd = unix_domain_client_init(simulator_server_path);
+
+    for(int i = 0; i < reader_num; i++){
+        reader_info[i].conn = accept(local_serverfd, NULL, NULL);
+        reader_info[i].vaild = 0;
+        printf("accept:%d\n", reader_info[i].conn);
+    }
+    printf("init ok\n");
+    while(1){
+        sleep(1);
+        trigger_reader(reader_info);
+        while(1){
+            fd_set fds;
+            memset(&fds, 0, sizeof(fd_set));
+            FD_SET(remote_clientfd, &fds);
+            int maxfd = remote_clientfd;
+            for(int i = 0; i < reader_num; i++){
+                FD_SET(reader_info[i].conn, &fds);
+                maxfd = maxfd > reader_info[i].conn ? maxfd : reader_info[i].conn;
+            }
+
+            struct timeval tv;
+            task_t task;
+            tv.tv_sec = 5;
+            tv.tv_usec = 0;
+            int ret = select(maxfd + 1, &fds, NULL, NULL, &tv);
+            if(ret > 0){
+                if(FD_ISSET(remote_clientfd, &fds)){
+                    printf("should not be tag data\n");
+                    //recv_from_tag();
+                }else{
+                    for(int i = 0; i < reader_num; i++){                    
+                        if(FD_ISSET(reader_info[i].conn, &fds)){
+                            read(reader_info[i].conn, (char *)&task, sizeof(task_t));
+                            reader_info[i].start_time = task.start_time;
+                            reader_info[i].addr = task.addr;
+                            reader_info[i].plen = task.plen;
+                            reader_info[i].vaild = 1;
+                            memcpy(reader_info[i].payload, task.payload, task.plen);
+                        }
+                    }
+                }
+            }else{                
+                reader_info_t *reader_info_item = select_reader(reader_info);                
+                if(!reader_info_item){
+                    task.type = DOWNLINK_COLLISION;
+                    for(int i = 0; i < reader_num; i++){
+                        write(reader_info[i].conn, (task_t *)&task, sizeof(task_t));
+                    }
+                }else{
+                    write(remote_clientfd, reader_info_item->payload, reader_info_item->plen);
+                    proxy_msg_t *proxy_msg = (proxy_msg_t *)malloc(sizeof(proxy_msg_t));
+                    memset(proxy_msg, 0, sizeof(proxy_msg));
+                    read(remote_clientfd, (char *)proxy_msg, sizeof(proxy_msg_t));
+                    if(proxy_msg->type == UPLINK_COLLISION){
+                        task.type = UPLINK_COLLISION;
+                        task.response_reader = reader_info_item->addr;
+                    }else if(proxy_msg->type == UPLINK_DATA){
+                        task.type = UPLINK_DATA;
+                        task.response_reader = reader_info_item->addr;
+                        task.plen = proxy_msg->plen;
+                        memcpy(task.payload, proxy_msg->payload, proxy_msg->plen);
+                    }else{  //UPLINK_IDLE
+                        task.type = UPLINK_IDLE;
+                        task.response_reader = reader_info_item->addr;
+                    }
+                    free(proxy_msg);
+                    for(int i = 0; i < reader_num; i++){
+                        write(reader_info[i].conn, (task_t *)&task, sizeof(task_t));
+                    }
+                }
+                break;
+            }
+        }
+    }
+
 }
 
 
@@ -411,34 +556,14 @@ int main(int argc, char *argv[]){
         return 0;
     }   
     srand(time(NULL));
-    readers_init();
-    readers_connect();    
-    while(1){
-        for(int i = 0; i < reader_num; i++){
-            reader_item_table[i].start_time = gen_start_time();
-            reader_item_table[i].end_time = reader_item_table[i].start_time + (reader_item_table[i].txbuflen * 8)*1000/DOWNLINK_BITRATE;
-        }
-        reader_t *reader = select_reader();
-        printf("p_reader:%p\n", reader);
-        if(reader == NULL){         //downlink collision
-            continue; 
-        }else{
-            int tag_addr_range = 0;
-            if(reader->downlink_frame.collision_num){
-                tag_addr_range = reader->downlink_frame.collision_num*2;
-            }else{
-                tag_addr_range = 1;
-            }
-            send_discovery_request(reader);
-//           recv_discovery_ack(reader);
-            recv_from_tag();
-            parse_uplink(reader);
+    
+    pthread_t thread_proxy;
+    pthread_create(&thread_proxy, NULL, reader_proxy, NULL);
 
-            for(int j = 1; j < tag_addr_range; j++){                
-                send_query_request(reader, j);
-                recv_from_tag();
-                parse_uplink(reader);
-            }
-        }
+    sleep(1);
+    pthread_t *thread_tab = (pthread_t *)malloc(sizeof(pthread_t)*reader_num);
+    for(int i = 0; i < reader_num; i++){
+        pthread_create(&thread_tab[i], NULL, reader_thread, NULL);
     }
+    while(1);
 }
