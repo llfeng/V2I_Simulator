@@ -268,6 +268,8 @@ void parse_downlink(tag_t *tag, char *buf){
             }
 */            
             if(short_addr == 0){
+                tag->addr = short_addr;
+                tag->dst = src_addr;
                 send_to_proxy(tag);
             }
         }
@@ -360,6 +362,7 @@ void tag_info_handler(tag_info_t *tag_info, int remote_conn){
     int collision_flag = 0;
     for(int i = 0; i < tag_num; i++){
         if(tag_info[i].vaild){
+            printf("[--will send: %02x %02x--]\n", tag_info[i].payload[0], tag_info[i].payload[1]);
             vaild_index = i;
             vaild_num++;
             short_addr = (tag_info[i].payload[1] >> 4);
@@ -420,7 +423,7 @@ void *tag_proxy(){
         }
 
         struct timeval tv;
-        tv.tv_sec = 5;
+        tv.tv_sec = 3;
         tv.tv_usec = 0;
         int ret = select(maxfd + 1, &fds, NULL, NULL, &tv);
         if(ret > 0){

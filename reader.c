@@ -107,7 +107,8 @@ typedef struct{
 
 typedef struct{
     int type;
-    int start_time;
+    int reader_frame_state;
+    long int start_time;
     int addr;
     int response_reader;
     int plen;
@@ -295,8 +296,13 @@ void downlink_collision_handler(reader_t *reader){
 //do nothing, just wait for retransmission
 }
 
+void carrier_block_handler(reader_t *reader){
+//do nothing.
+}
+
 void uplink_collision_handler(reader_t *reader, task_t *task){
-    if(task->addr == reader->addr){ //for me
+    printf("task->response_reader:%d, reader->addr:%d\n", task->response_reader, reader->addr);
+    if(task->response_reader == reader->addr){ //for me
         reader->collision_num++;
         reader->query_addr++;
         if(reader->query_addr == reader->tag_addr_range){
@@ -318,7 +324,7 @@ void uplink_collision_handler(reader_t *reader, task_t *task){
 }
 
 void data_handler(reader_t *reader, task_t *task){
-    if(task->addr == reader->addr){
+    if(task->response_reader == reader->addr){
         reader->query_addr++;
         if(reader->query_addr == reader->tag_addr_range){
             reader->state = DISCOVERY_REQUEST;
@@ -337,7 +343,7 @@ void data_handler(reader_t *reader, task_t *task){
 }
 
 void uplink_idle_handler(reader_t *reader, task_t *task){
-    if(task->addr == reader->addr){
+    if(task->response_reader == reader->addr){
         reader->query_addr++;
         printf("---tag_range:%d\n", reader->tag_addr_range);
         if(reader->query_addr == reader->tag_addr_range){
@@ -400,10 +406,12 @@ int enframe(reader_t *reader, char *txbuf){
 #define UPLINK_IDLE         2
 #define UPLINK_DATA         3
 #define DOWNLINK_COLLISION  4
-#define TRIGGER             5
+#define CARRIER_BLOCK       5
+#define TRIGGER             6
 
 void *reader_thread(){
     reader_t *reader = create_reader();
+    reader_t *reader_backup = create_reader();
     int conn = unix_domain_client_init(reader_proxy_path);
     reader_init(reader, conn);
 
@@ -419,7 +427,9 @@ void *reader_thread(){
         int readlen = read(conn, (char *)task, sizeof(task_t));
         printf("[%ld->>>>recv>>>", time(NULL));
         if(task->type == DOWNLINK_COLLISION){
-            downlink_collision_handler(reader);
+            printf("DOWNLINK_COLLISION>>>]\n");
+            memcpy(reader, reader_backup, sizeof(reader_t));
+//            downlink_collision_handler(reader);
         }else if(task->type == UPLINK_COLLISION){
             printf("UPLINK_COLLISION>>>]\n");
             uplink_collision_handler(reader, task);
@@ -427,15 +437,19 @@ void *reader_thread(){
             printf("UPLINK_DATA>>>]\n");
             data_handler(reader, task);
         }else if(task->type == TRIGGER){
+            memcpy(reader_backup, reader, sizeof(reader_t));
             printf("TRIGGER>>>]\n");
             task->type = ACTIVE;
-            task->start_time = time(NULL) + gen_start_time();
             task->addr = conn;
             task->plen = enframe(reader, task->payload);        
-            write(conn, (char *)task, sizeof(task_t));        
+            task->reader_frame_state = reader->state;
             if(reader->state == DISCOVERY_REQUEST){
+                task->start_time = time(NULL) + gen_start_time();
                 reader->query_addr = 0;
+            }else{
+                task->start_time = time(NULL);
             }
+            write(conn, (char *)task, sizeof(task_t));        
             printf("[%ld->>>>send>>>", time(NULL));
             for(int i = 0; i < task->plen; i++){
                 printf(" %02x", task->payload[i]);
@@ -444,9 +458,14 @@ void *reader_thread(){
         }else if(task->type == UPLINK_IDLE){
             uplink_idle_handler(reader, task);
             printf("UPLINK_IDLE>>>]\n");
+        }else if(task->type == CARRIER_BLOCK){
+            printf("reader:%d CARRIER_BLOCK>>>]\n", reader->addr);
+            memcpy(reader, reader_backup, sizeof(reader_t));
+//            carrier_block_handler(reader); 
         }
     }
     destroy_reader(reader);
+    destroy_reader(reader_backup);
 }
 
 
@@ -503,6 +522,8 @@ void *reader_proxy(){
                         if(FD_ISSET(reader_info[i].conn, &fds)){
                             read(reader_info[i].conn, (char *)&task, sizeof(task_t));
                             reader_info[i].start_time = task.start_time;
+                            reader_info[i].end_time = reader_info[i].start_time + (reader_info[i].plen * 8)*1000/DOWNLINK_BITRATE;
+                            printf("s:%ld, e:%ld\n", reader_info[i].start_time, reader_info[i].end_time);
                             reader_info[i].addr = task.addr;
                             reader_info[i].plen = task.plen;
                             reader_info[i].vaild = 1;
@@ -515,9 +536,27 @@ void *reader_proxy(){
                 if(!reader_info_item){
                     task.type = DOWNLINK_COLLISION;
                     for(int i = 0; i < reader_num; i++){
-                        write(reader_info[i].conn, (task_t *)&task, sizeof(task_t));
+                        if(reader_info[i].vaild){
+                            write(reader_info[i].conn, (char *)&task, sizeof(task_t));
+                            reader_info[i].vaild = 0;
+                        }
                     }
                 }else{
+                    for(int i = 0; i < reader_num; i++){
+                        if(reader_info[i].vaild){
+                            if(reader_info_item != &reader_info[i] &&
+                            reader_info_item->start_time > reader_info[i].start_time){
+                                task.type = DOWNLINK_COLLISION;
+                                write(reader_info[i].conn, (char *)&task, sizeof(task_t));
+                            }else if(reader_info_item != &reader_info[i] &&
+                            reader_info_item->start_time < reader_info[i].start_time){
+                                task.type = CARRIER_BLOCK;
+                                write(reader_info[i].conn, (char *)&task, sizeof(task_t));
+                            }
+                            reader_info[i].vaild = 0;
+                        }
+                    }
+                    
                     write(remote_clientfd, reader_info_item->payload, reader_info_item->plen);
                     proxy_msg_t *proxy_msg = (proxy_msg_t *)malloc(sizeof(proxy_msg_t));
                     memset(proxy_msg, 0, sizeof(proxy_msg));
@@ -536,7 +575,7 @@ void *reader_proxy(){
                     }
                     free(proxy_msg);
                     for(int i = 0; i < reader_num; i++){
-                        write(reader_info[i].conn, (task_t *)&task, sizeof(task_t));
+                        write(reader_info[i].conn, (char *)&task, sizeof(task_t));
                     }
                 }
                 break;
