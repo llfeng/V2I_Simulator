@@ -86,6 +86,7 @@ typedef struct{
 typedef struct{
     char reader;
     char tag;
+    int vaild;
 }tag_alias_t;
 
 typedef struct{
@@ -113,6 +114,9 @@ typedef struct{
     int plen;
     char payload[FRAME_MAX_LEN];
 }tag_info_t;
+
+
+pthread_mutex_t tag_mutex;
 
 tag_t tag_item_table[TAG_MAX_NUM];
 
@@ -186,12 +190,17 @@ void delete_alias(tag_t *tag, char reader_addr){
     }
 }
 
-int lookup_alias(tag_t *tag, char short_addr, char reader_addr){
-    printf("short_addr:%d,reader_addr:%d\n", short_addr, reader_addr);
+int lookup_alias(tag_t *tag, char short_addr, char reader_addr, int acked){
     for(int i = 0; i < tag->alias_num; i++){
-        printf("[%d]--tag:%d,reader:%d\n", i, tag->alias[i].tag, tag->alias[i].reader);
-        if(reader_addr == tag->alias[i].reader && short_addr == tag->alias[i].tag){
-            return 1;
+        if(reader_addr == tag->alias[i].reader && 
+        short_addr == tag->alias[i].tag){
+            if(acked){
+                if(tag->alias[i].vaild){
+                    return 1;
+                }
+            }else{
+                return 1;
+            }
         }
     }
     return 0;
@@ -202,13 +211,23 @@ void send_to_proxy(tag_t *tag){
     tag->txbuf[1] = (tag->addr << 4);
     tag->txbuf[1] += 0;
     tag->txbuflen = 2;
-    printf("[%ld---- %02x %02x---]\n", time(NULL), tag->txbuf[0], tag->txbuf[1]);
+    printf("[%ld----send: %02x %02x---]\n", time(NULL), tag->txbuf[0], tag->txbuf[1]);
     int sent_bytes = write(tag->conn, tag->txbuf, tag->txbuflen);
 }
 
 
 void keep_silent(tag_t *tag, int reader_addr){
-    tag->silent[tag->silent_num++] = reader_addr;
+    int exist_flag = 0;
+    for(int i = 0; i < tag->silent_num; i++){
+        if(tag->silent[i] == reader_addr){
+            exist_flag = 1;
+            break;
+        }
+    }
+    
+    if(exist_flag == 0){
+        tag->silent[tag->silent_num++] = reader_addr;
+    }
 }
 
 int is_silent(tag_t *tag, int reader_addr){
@@ -220,18 +239,26 @@ int is_silent(tag_t *tag, int reader_addr){
     return 0;
 }
 
-void parse_downlink(tag_t *tag, char *buf){
-    char src_addr = buf[0];
+void parse_downlink(tag_t *tag, char *buf){     //mac
+    char reader_addr = buf[0];
     char frame_type = buf[1] >> 4;
-    char dst_addr = buf[1] & 0x0F;
-    tag->dst = src_addr;
-    printf("frame type:%d\n", frame_type);
+    char frame_state = frame_type & 0x04;
+    char tag_addr = buf[1] & 0x0F;
+
+    pthread_mutex_lock(&tag_mutex);     
+    printf("[before]:\n");
+    for(int i = 0; i < tag->alias_num; i++){
+        printf("tag->alias[%d]--reader:%d,tag:%d,vaild:%d\n", i, tag->alias[i].reader, tag->alias[i].tag,tag->alias[i].vaild);
+    }
+    for(int i = 0; i < tag->silent_num; i++){
+        printf("tag->silent[%d]:%d\n", i, tag->silent[i]);
+    }
     switch(frame_type & 0x03){
         case ACK:
             for(int i = 0; i < tag->alias_num; i++){
-//                if(tag->alias[i].reader == src_addr && tag->alias[i].tag == dst_addr - 1){
-                if(tag->alias[i].reader == src_addr && tag->alias[i].tag == dst_addr){
-                    keep_silent(tag, src_addr);
+                if(tag->alias[i].reader == reader_addr && tag->alias[i].tag == tag_addr - 1){ 
+                    tag->alias[i].vaild = 1;
+                    keep_silent(tag, reader_addr);
                 }
             }
             break;
@@ -243,46 +270,50 @@ void parse_downlink(tag_t *tag, char *buf){
             break;
     }
 
-    printf("[%ld----recv--%2x %2x ", time(NULL), buf[0], buf[1]);
-    if((frame_type & 0x04) == DISCOVERY_REQUEST){ 
-        printf("%2x---]\n", buf[2]);
-        if(is_silent(tag, src_addr)){
-            delete_alias(tag, src_addr);
+    if(frame_state == DISCOVERY_REQUEST){
+        char plen = buf[2] & 0x0F;
+        printf("[%ld--recv:%02x %02x %02x ", time(NULL), buf[0], buf[1], buf[2]);
+        for(int i = 0; i < plen; i += 2){
+            printf("%02x %02x ", buf[i+3], buf[i+4]);
+            if(lookup_alias(tag, buf[i+4], buf[i+3], 1) == 1){
+                keep_silent(tag, reader_addr);
+            }
+        }
+        printf("---]\n");
+        if(is_silent(tag, reader_addr) == 1){
+            delete_alias(tag, reader_addr);
         }else{
-            char collision_num = buf[2] >> 4;
-            char plen = buf[2] & 0x0F;
             char addr_range = 0;
+            char collision_num = buf[2] >> 4;
             if(collision_num == 0){
                 addr_range = 1;
             }else{
                 addr_range = 2 * collision_num;
             }
-            char short_addr = random()%addr_range;
-            printf("[%s]---short_addr:%d\n", __func__, short_addr);
-            update_alias(tag, short_addr, src_addr);
-/* 
-            if(short_addr != addr_range-1){
-                update_alias(tag, short_addr, src_addr);
-            }else{// the last one.
-                update_alias(tag, 0xFF, src_addr);
-            }
-*/            
+            char short_addr = random()%addr_range;            
+            update_alias(tag, short_addr, reader_addr);
             if(short_addr == 0){
                 tag->addr = short_addr;
-                tag->dst = src_addr;
+                tag->dst = reader_addr;
                 send_to_proxy(tag);
             }
         }
-
-    }else if((frame_type & 0x04) == QUERY_REQUEST){
-        printf("---]\n");
-        if(lookup_alias(tag, dst_addr, src_addr) == 1){
-            tag->addr = dst_addr;
-            tag->dst = src_addr;
+    }else{  //QUERY_REQUEST
+        printf("[%ld--recv:%02x %02x]\n", time(NULL), buf[0], buf[1]);
+        if(lookup_alias(tag, tag_addr, reader_addr, 0) == 1){
+            tag->addr = tag_addr;
+            tag->dst = reader_addr;
             send_to_proxy(tag);
         }
     }
-
+    printf("[after]:\n");
+    for(int i = 0; i < tag->alias_num; i++){
+        printf("tag->alias[%d]--reader:%d,tag:%d,vaild:%d\n", i, tag->alias[i].reader, tag->alias[i].tag,tag->alias[i].vaild);
+    }
+    for(int i = 0; i < tag->silent_num; i++){
+        printf("tag->silent[%d]:%d\n", i, tag->silent[i]);
+    }
+    pthread_mutex_unlock(&tag_mutex);
 }
 
 tag_t *create_tag(){
@@ -466,6 +497,7 @@ int main(int argc, char *argv[]){
         return 0;
     }
     srand(time(NULL));
+    pthread_mutex_init(&tag_mutex, 0);
 
     pthread_t thread_proxy;
     pthread_create(&thread_proxy, NULL, tag_proxy, NULL);

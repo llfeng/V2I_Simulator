@@ -111,9 +111,8 @@ typedef struct{
     long int start_time;
     int addr;
     int response_reader;
-    int plen;
-    char payload[32];
-    
+    int buflen;
+    char buf[32];
 }task_t;
 
 
@@ -132,6 +131,9 @@ typedef struct{
     int plen;
     char payload[32];
 }proxy_msg_t;
+
+
+pthread_mutex_t reader_mutex;
 
 
 int reader_num;
@@ -183,32 +185,6 @@ int gen_start_time(){
     return offset + (random() % DOWNLINK_WINDOW) * DOWN_SLOT_TIME;
 }
 
-void enframe_discovery(reader_t *reader){
-    reader->txbuf[0] = reader->downlink_frame.src;
-
-    //reader->txbuf[1] = (reader->downlink_frame.type << 4);    
-    reader->txbuf[1] = ((reader->downlink_frame.ack + DISCOVERY_REQUEST) << 4);
-
-    printf("f_type:%d\n", reader->downlink_frame.type);
-    reader->txbuf[1] += reader->downlink_frame.dst;
-    reader->txbuf[2] = (reader->downlink_frame.collision_num << 4);
-    reader->txbuf[2] += 0;
-    reader->txbuflen = 3;
-    printf("enframe:");
-    for(int i = 0; i < reader->txbuflen; i++){
-        printf("%02x ", reader->txbuf[i]);
-    }
-    printf("\n");
-}
-
-
-void enframe_query(reader_t *reader){
-    reader->txbuf[0] = reader->downlink_frame.src;
-    //reader->txbuf[1] = (reader->downlink_frame.type << 4);
-    reader->txbuf[1] = ((reader->downlink_frame.ack + QUERY_REQUEST) << 4);
-    reader->txbuf[1] += reader->downlink_frame.dst;
-    reader->txbuflen = 2;
-}
 
 reader_info_t *select_reader(reader_info_t *reader_item_table){
     reader_info_t *reader_array[READER_MAX_NUM] = {NULL};
@@ -265,18 +241,6 @@ reader_info_t *select_reader(reader_info_t *reader_item_table){
     return NULL;
 }
 
-void readers_init(){
-    for(int i = 0; i < reader_num; i++){
-        memset(&reader_item_table[i], 0, sizeof(reader_t));
-        reader_item_table[i].downlink_frame.src = i;
-        //reader_item_table[i].downlink_frame.type = DISCOVERY_REQUEST_NACK;
-        reader_item_table[i].downlink_frame.type = NACK;
-        reader_item_table[i].downlink_frame.dst = 0x0F;
-        reader_item_table[i].downlink_frame.collision_num = 0;
-        reader_item_table[i].downlink_frame.plen = 0;
-    }
-}
-
 void usage(char *prog){
     printf("Usage:%s <reader_num> <tag_num>\n", prog);
 }
@@ -324,21 +288,26 @@ void uplink_collision_handler(reader_t *reader, task_t *task){
 }
 
 void data_handler(reader_t *reader, task_t *task){
-    if(task->response_reader == reader->addr){
+    if(task->response_reader == reader->addr){      //response data is for me
         reader->query_addr++;
-        if(reader->query_addr == reader->tag_addr_range){
+        if(reader->query_addr >= reader->tag_addr_range){
             reader->state = DISCOVERY_REQUEST;
             reader->ack = ACK;
-            reader->query_addr = reader->tag_addr_range-1;            
+//            reader->query_addr = reader->tag_addr_range-1;            
+            reader->query_addr = reader->tag_addr_range;
             if(reader->collision_num){
                 reader->tag_addr_range = 2*reader->collision_num;
             }else{
                 reader->tag_addr_range = 1;
             }
-        }else{
+        }else{  
             reader->state = QUERY_REQUEST;
             reader->ack = ACK;            
         }
+    }else{  //response data is not for me. Save response data as an address pair.
+        reader->pair[reader->pair_num].reader = task->buf[0];
+        reader->pair[reader->pair_num].tag = (task->buf[1] >> 4);
+        reader->pair_num++;
     }
 }
 
@@ -387,9 +356,15 @@ int enframe(reader_t *reader, char *txbuf){
     txbuf[1] += reader->query_addr;
     if(reader->state == DISCOVERY_REQUEST){
         txbuf[2] = (reader->collision_num << 4);
-        txbuf[2] += reader->plen;
-        memcpy(&txbuf[3], reader->payload, reader->plen);
-        txbuflen = 3+reader->plen;
+        txbuf[2] += reader->pair_num * 2;        
+        for(int i = 0; i < reader->pair_num; i++){
+            txbuf[i*2+3] = reader->pair[i].reader;
+            txbuf[i*2+4] = reader->pair[i].tag;
+            reader->pair[i].reader = 0;
+            reader->pair[i].tag = 0;
+        }
+        txbuflen = 3 + reader->pair_num * 2;
+        reader->pair_num = 0;
         reader->collision_num = 0;
     }else{
         txbuflen = 2;
@@ -409,6 +384,8 @@ int enframe(reader_t *reader, char *txbuf){
 #define CARRIER_BLOCK       5
 #define TRIGGER             6
 
+
+
 void *reader_thread(){
     reader_t *reader = create_reader();
     reader_t *reader_backup = create_reader();
@@ -422,26 +399,39 @@ void *reader_thread(){
     printf("conn:%d\n", conn);
 
     task_t *task = (task_t *)malloc(sizeof(task_t));
+    char log_str[2048] = {0};
+    char tmp_str[512] = {0};
     while(1){
+        memset(log_str, 0, sizeof(log_str));
         memset(task, 0, sizeof(task_t));
         int readlen = read(conn, (char *)task, sizeof(task_t));
-        printf("[%ld->>>>recv>>>", time(NULL));
+        memset(tmp_str, 0, sizeof(tmp_str));
+        sprintf(tmp_str, "[%ld->>>>recv>>>", time(NULL));
+        strcat(log_str, tmp_str);
         if(task->type == DOWNLINK_COLLISION){
-            printf("DOWNLINK_COLLISION>>>]\n");
+            memset(tmp_str, 0, sizeof(tmp_str));
+            sprintf(tmp_str, "DOWNLINK_COLLISION>>>]\n");
+            strcat(log_str, tmp_str);
             memcpy(reader, reader_backup, sizeof(reader_t));
 //            downlink_collision_handler(reader);
         }else if(task->type == UPLINK_COLLISION){
-            printf("UPLINK_COLLISION>>>]\n");
+            memset(tmp_str, 0, sizeof(tmp_str));
+            sprintf(tmp_str, "UPLINK_COLLISION>>>]\n");
+            strcat(log_str, tmp_str);
             uplink_collision_handler(reader, task);
         }else if(task->type == UPLINK_DATA){
-            printf("UPLINK_DATA>>>]\n");
+            memset(tmp_str, 0, sizeof(tmp_str));
+            sprintf(tmp_str, "UPLINK_DATA>>> %02x %02x>>>]\n", task->buf[0], task->buf[1]);
+            strcat(log_str, tmp_str);
             data_handler(reader, task);
         }else if(task->type == TRIGGER){
             memcpy(reader_backup, reader, sizeof(reader_t));
-            printf("TRIGGER>>>]\n");
+            memset(tmp_str, 0, sizeof(tmp_str));
+            sprintf(tmp_str,"TRIGGER>>>]\n");
+            strcat(log_str, tmp_str);
             task->type = ACTIVE;
             task->addr = conn;
-            task->plen = enframe(reader, task->payload);        
+            task->buflen = enframe(reader, task->buf);        
             task->reader_frame_state = reader->state;
             if(reader->state == DISCOVERY_REQUEST){
                 task->start_time = time(NULL) + gen_start_time();
@@ -450,19 +440,32 @@ void *reader_thread(){
                 task->start_time = time(NULL);
             }
             write(conn, (char *)task, sizeof(task_t));        
-            printf("[%ld->>>>send>>>", time(NULL));
-            for(int i = 0; i < task->plen; i++){
-                printf(" %02x", task->payload[i]);
+            memset(tmp_str, 0, sizeof(tmp_str));
+            sprintf(tmp_str, "[%ld->>>>send>>>", time(NULL));
+            strcat(log_str, tmp_str);
+            for(int i = 0; i < task->buflen; i++){
+                memset(tmp_str, 0, sizeof(tmp_str));
+                sprintf(tmp_str, " %02x", task->buf[i]);
+                strcat(log_str, tmp_str);
             }
-            printf(">>>>]\n");
+            memset(tmp_str, 0, sizeof(tmp_str));
+            sprintf(tmp_str, ">>>>]\n");
+            strcat(log_str, tmp_str);
         }else if(task->type == UPLINK_IDLE){
             uplink_idle_handler(reader, task);
-            printf("UPLINK_IDLE>>>]\n");
+            memset(tmp_str, 0, sizeof(tmp_str));
+            sprintf(tmp_str, "UPLINK_IDLE>>>]\n");
+            strcat(log_str, tmp_str);
         }else if(task->type == CARRIER_BLOCK){
-            printf("reader:%d CARRIER_BLOCK>>>]\n", reader->addr);
+            memset(tmp_str, 0, sizeof(tmp_str));
+            sprintf(tmp_str, "reader:%d CARRIER_BLOCK>>>]\n", reader->addr);
+            strcat(log_str, tmp_str);
             memcpy(reader, reader_backup, sizeof(reader_t));
 //            carrier_block_handler(reader); 
         }
+        pthread_mutex_lock(&reader_mutex);
+        printf("\n%s\n", log_str);
+        pthread_mutex_unlock(&reader_mutex);
     }
     destroy_reader(reader);
     destroy_reader(reader_backup);
@@ -525,9 +528,9 @@ void *reader_proxy(){
                             reader_info[i].end_time = reader_info[i].start_time + (reader_info[i].plen * 8)*1000/DOWNLINK_BITRATE;
                             printf("s:%ld, e:%ld\n", reader_info[i].start_time, reader_info[i].end_time);
                             reader_info[i].addr = task.addr;
-                            reader_info[i].plen = task.plen;
+                            reader_info[i].plen = task.buflen;
                             reader_info[i].vaild = 1;
-                            memcpy(reader_info[i].payload, task.payload, task.plen);
+                            memcpy(reader_info[i].payload, task.buf, task.buflen);
                         }
                     }
                 }
@@ -567,8 +570,8 @@ void *reader_proxy(){
                     }else if(proxy_msg->type == UPLINK_DATA){
                         task.type = UPLINK_DATA;
                         task.response_reader = reader_info_item->addr;
-                        task.plen = proxy_msg->plen;
-                        memcpy(task.payload, proxy_msg->payload, proxy_msg->plen);
+                        task.buflen = proxy_msg->plen;
+                        memcpy(task.buf, proxy_msg->payload, proxy_msg->plen);
                     }else{  //UPLINK_IDLE
                         task.type = UPLINK_IDLE;
                         task.response_reader = reader_info_item->addr;
@@ -596,6 +599,9 @@ int main(int argc, char *argv[]){
     }   
     srand(time(NULL));
     
+    pthread_mutex_init(&reader_mutex, 0);
+
+
     pthread_t thread_proxy;
     pthread_create(&thread_proxy, NULL, reader_proxy, NULL);
 
