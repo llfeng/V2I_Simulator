@@ -30,6 +30,7 @@
 #include <errno.h>
 #include <time.h>
 #include <pthread.h>
+#include "common.h"
 
 #define FRAME_MAX_LEN   32
 #define PAYLOAD_MAX_LEN 24
@@ -120,43 +121,14 @@ pthread_mutex_t tag_mutex;
 
 tag_t tag_item_table[TAG_MAX_NUM];
 
+char *trace_sock_path = "trace.sock";
 char *tag_proxy_path = "tag_proxy.sock";
 char *simulator_server_path = "server.socket";
 
 int reader_num;
 int tag_num;
 
-int unix_domain_server_init(char *path){
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    if(fd < 0){ 
-        perror("create sock fail:");
-    }   
-    struct sockaddr_un addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, path, sizeof(addr.sun_path)-1);
-    unlink(path);
-    if(bind(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0){
-        perror("bind fail:");
-    }   
-    if(listen(fd, 5) < 0){ 
-        perror("listen fail:");
-    }   
-    return fd;
-}
-
-int unix_domain_client_init(char *path){
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    struct sockaddr_un addr;
-    memset(&addr, 0, sizeof(addr));
-
-    addr.sun_family = AF_UNIX;
-
-    strncpy(addr.sun_path, path, sizeof(addr.sun_path)-1);
-
-    connect(fd, (struct sockaddr *)&addr, sizeof(addr));
-    return fd;
-}
+int trace_fd = -1;
 
 
 void update_alias(tag_t *tag, char short_addr, char reader_addr){
@@ -498,6 +470,8 @@ int main(int argc, char *argv[]){
     }
     srand(time(NULL));
     pthread_mutex_init(&tag_mutex, 0);
+
+    trace_fd = unix_domain_client_init(trace_sock_path);
 
     pthread_t thread_proxy;
     pthread_create(&thread_proxy, NULL, tag_proxy, NULL);

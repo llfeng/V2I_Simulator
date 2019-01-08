@@ -33,6 +33,7 @@
 #include <fcntl.h>
 #include <time.h>
 #include <pthread.h>
+#include "common.h"
 
 
 #define DOWN_SLOT_TIME   60
@@ -109,6 +110,7 @@ typedef struct{
     int type;
     int reader_frame_state;
     long int start_time;
+    int backoff_time;
     int addr;
     int response_reader;
     int buflen;
@@ -121,6 +123,7 @@ typedef struct{
     int vaild;
     uint64_t start_time;
     uint64_t end_time;
+    int backoff_time;
     int addr;
     int plen;
     char payload[32];
@@ -133,6 +136,30 @@ typedef struct{
 }proxy_msg_t;
 
 
+
+//Task define 
+#define ACTIVE              0
+#define UPLINK_COLLISION    1
+#define UPLINK_IDLE         2
+#define UPLINK_DATA         3
+#define DOWNLINK_COLLISION  4
+#define CARRIER_BLOCK       5
+#define TRIGGER             6
+
+#define TRACE_TYPE_NUM      7
+#define NAME_MAX_LEN        48
+
+char trace_type[TRACE_TYPE_NUM][NAME_MAX_LEN] = {
+    "ACTIVE",
+    "UPLINK_COLLISION",
+    "UPLINK_IDLE",
+    "UPLINK_DATA",
+    "DOWNLINK_COLLISION",
+    "CARRIER_BLOCK",
+    "TRIGGER"
+};
+
+
 pthread_mutex_t reader_mutex;
 
 
@@ -141,42 +168,13 @@ int tag_num;
 
 reader_t reader_item_table[READER_MAX_NUM];
 
+int trace_fd = -1;
 
+char trace_buf[512] = {0};
 
+char *trace_sock_path = "trace.sock";
 char *reader_proxy_path = "reader_proxy.sock";
 char *simulator_server_path = "server.socket";
-
-int unix_domain_server_init(char *path){
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0); 
-    if(fd < 0){ 
-        perror("create sock fail:");
-    }   
-    struct sockaddr_un addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, path, sizeof(addr.sun_path)-1);
-    unlink(path);
-    if(bind(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0){ 
-        perror("bind fail:");
-    }   
-    if(listen(fd, 5) < 0){ 
-        perror("listen fail:");
-    }   
-    return fd;     
-}
-
-int unix_domain_client_init(char *path){
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0); 
-    struct sockaddr_un addr;
-    memset(&addr, 0, sizeof(addr));
-
-    addr.sun_family = AF_UNIX;
-
-    strncpy(addr.sun_path, path, sizeof(addr.sun_path)-1);
-
-    connect(fd, (struct sockaddr *)&addr, sizeof(addr));
-    return fd; 
-}
 
 
 int gen_start_time(){
@@ -375,16 +373,6 @@ int enframe(reader_t *reader, char *txbuf){
 
 
 
-//Task define 
-#define ACTIVE              0
-#define UPLINK_COLLISION    1
-#define UPLINK_IDLE         2
-#define UPLINK_DATA         3
-#define DOWNLINK_COLLISION  4
-#define CARRIER_BLOCK       5
-#define TRIGGER             6
-
-
 
 void *reader_thread(){
     reader_t *reader = create_reader();
@@ -434,10 +422,12 @@ void *reader_thread(){
             task->buflen = enframe(reader, task->buf);        
             task->reader_frame_state = reader->state;
             if(reader->state == DISCOVERY_REQUEST){
-                task->start_time = time(NULL) + gen_start_time();
+                task->backoff_time = gen_start_time();
+                task->start_time = time(NULL) + task->backoff_time;
                 reader->query_addr = 0;
             }else{
-                task->start_time = time(NULL);
+                task->backoff_time = 0;
+                task->start_time = time(NULL) + task->backoff_time;
             }
             write(conn, (char *)task, sizeof(task_t));        
             memset(tmp_str, 0, sizeof(tmp_str));
@@ -525,6 +515,7 @@ void *reader_proxy(){
                         if(FD_ISSET(reader_info[i].conn, &fds)){
                             read(reader_info[i].conn, (char *)&task, sizeof(task_t));
                             reader_info[i].start_time = task.start_time;
+                            reader_info[i].backoff_time = task.backoff_time;
                             reader_info[i].end_time = reader_info[i].start_time + (reader_info[i].plen * 8)*1000/DOWNLINK_BITRATE;
                             printf("s:%ld, e:%ld\n", reader_info[i].start_time, reader_info[i].end_time);
                             reader_info[i].addr = task.addr;
@@ -537,6 +528,7 @@ void *reader_proxy(){
             }else{                
                 reader_info_t *reader_info_item = select_reader(reader_info);                
                 if(!reader_info_item){
+                    RECORD_TRACE(trace_fd, trace_buf, "%s\n", trace_type[DOWNLINK_COLLISION]);
                     task.type = DOWNLINK_COLLISION;
                     for(int i = 0; i < reader_num; i++){
                         if(reader_info[i].vaild){
@@ -554,6 +546,7 @@ void *reader_proxy(){
                             }else if(reader_info_item != &reader_info[i] &&
                             reader_info_item->start_time < reader_info[i].start_time){
                                 task.type = CARRIER_BLOCK;
+                                RECORD_TRACE(trace_fd, trace_buf, "%s\n", trace_type[CARRIER_BLOCK]);
                                 write(reader_info[i].conn, (char *)&task, sizeof(task_t));
                             }
                             reader_info[i].vaild = 0;
@@ -601,6 +594,7 @@ int main(int argc, char *argv[]){
     
     pthread_mutex_init(&reader_mutex, 0);
 
+    trace_fd = unix_domain_client_init(trace_sock_path);
 
     pthread_t thread_proxy;
     pthread_create(&thread_proxy, NULL, reader_proxy, NULL);
