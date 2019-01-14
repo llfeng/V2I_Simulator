@@ -27,6 +27,11 @@ do{ \
 }while(0)
 
 
+extern void init_random();
+
+extern uint64_t get_random();
+
+extern void destroy_random();
 
 extern int unix_domain_server_init(char *path);
 

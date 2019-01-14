@@ -19,6 +19,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <stddef.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -29,10 +30,46 @@
 #include <unistd.h>  
 #include <fcntl.h>
 #include <time.h>
+#include <sys/time.h>
 #include <pthread.h>
 #include "common.h"
 
 
+int random_fd = -1;
+
+pthread_mutex_t random_mutex;
+
+void init_random(){
+    struct timeval tv;
+    gettimeofday(&tv,NULL);
+	printf("srand:%ld\n", tv.tv_usec);
+    srand(tv.tv_usec);
+//    pthread_mutex_init(&random_mutex, 0);
+}
+
+
+uint64_t get_random(){
+    return random();
+/*
+    pthread_mutex_lock(&random_mutex);
+    random_fd = open ("/dev/random", O_RDONLY);
+    if(random_fd < 0){
+        printf("get random error\n");
+    }
+    uint64_t r;
+    int len = read(random_fd, &r, sizeof(r));
+    if(len < 0){
+        printf("read random error\n");
+    }
+    close(random_fd);
+    pthread_mutex_unlock(&random_mutex);
+    return r;
+*/    
+}
+
+void destroy_random(){
+//    close(random_fd);
+}
 
 int unix_domain_server_init(char *path){
     int fd = socket(AF_UNIX, SOCK_STREAM, 0); 
