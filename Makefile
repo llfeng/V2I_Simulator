@@ -1,12 +1,12 @@
 
 all: tag reader trace
 
-tag: tag.c common.c
-	gcc tag.c common.c -o tag -lpthread
-reader: reader.c common.c
-	gcc reader.c common.c -o reader -lpthread
-trace: trace.c common.c
-	gcc trace.c common.c -o trace
+tag: tag.cpp common.cpp
+	g++ tag.cpp common.cpp -o tag -lpthread
+reader: reader.cpp common.cpp
+	g++ reader.cpp common.cpp -o reader -lpthread
+trace: trace.cpp common.cpp
+	g++ trace.cpp common.cpp -o trace
 
 
 

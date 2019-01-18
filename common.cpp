@@ -71,7 +71,7 @@ void destroy_random(){
 //    close(random_fd);
 }
 
-int unix_domain_server_init(char *path){
+int unix_domain_server_init(const char *path){
     int fd = socket(AF_UNIX, SOCK_STREAM, 0); 
     if(fd < 0){ 
         perror("create sock fail:");
@@ -90,7 +90,7 @@ int unix_domain_server_init(char *path){
     return fd; 
 }
 
-int unix_domain_client_init(char *path){
+int unix_domain_client_init(const char *path){
     int fd = socket(AF_UNIX, SOCK_STREAM, 0); 
     struct sockaddr_un addr;
     memset(&addr, 0, sizeof(addr));

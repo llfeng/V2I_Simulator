@@ -35,7 +35,7 @@
 
 #define TRACE_MAX_LEN   512
 
-char *trace_sock_path = "trace.sock";
+const char *trace_sock_path = "trace.sock";
 
 
 
