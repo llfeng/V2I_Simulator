@@ -30,6 +30,7 @@
 #include <errno.h>
 #include <time.h>
 #include <pthread.h>
+#include <math.h>
 #include "common.h"
 #include "log.h"
 
@@ -107,7 +108,8 @@ typedef struct{
     char txbuf[FRAME_MAX_LEN];
     char alias_num;
     tag_alias_t alias[READER_MAX_NUM];
-    int pos;
+    int posx;
+    int posy;
     int start_time;
 }tag_t;
 
@@ -131,9 +133,10 @@ const char *simulator_server_path = "server.socket";
 
 int reader_num;
 int tag_num;
-int g_spacing;
-int g_velocity;
-int g_comm_range;
+double g_spacing;
+double g_velocity;
+double g_com_dist;
+double g_sys_fov;
 
 int trace_fd = -1;
 
@@ -228,6 +231,8 @@ void send_to_proxy(tag_t *tag){
     rsp->plen = tag->txbuflen;
     memcpy(rsp->payload, tag->txbuf, rsp->plen);
     rsp->start_time = tag->start_time;
+    rsp->posx = tag->posx;
+    rsp->posy = tag->posy;
     
     int sent_bytes = write(tag->conn, (char *)rsp, sizeof(tag_response_t));
     free(rsp);
@@ -314,7 +319,7 @@ void parse_downlink(tag_t *tag, reader_request_t *req){     //mac
         LOG(INFO, "%ld--recv:%02x %02x %02x %02x", time(NULL), buf[0], buf[1], buf[2], buf[3]);
         for(int i = 0; i < plen; i += 3){
             //LOG(INFO, "%02x %02x ", buf[i+4], buf[i+5]);
-            if(lookup_alias(tag, buf[i+4], buf[i+5], buf[i+6], 0) == 1){
+            if(lookup_alias(tag, buf[i+4], buf[i+5], buf[i+6], 1) == 1){
                 keep_silent(tag, reader_addr);
             }
         }
@@ -439,7 +444,7 @@ tag_t *create_tag(){
     return tag;
 }
 
-void tag_init(tag_t *tag, int conn, int pos){
+void tag_init(tag_t *tag, int conn, int posx, int posy){
     tag->alias_num = 0;
     memset(tag->alias, 0, sizeof(tag->alias));
 
@@ -450,24 +455,44 @@ void tag_init(tag_t *tag, int conn, int pos){
     memset(tag->txbuf, 0, sizeof(tag->txbuf));
 
     tag->conn = conn;
-    tag->pos = pos;
+    tag->posx = posx;
+    tag->posy = posy;
 }
 
 
+int be_blocked(reader_request_t *reader_request, tag_t *tag){
+	return 0;
+}
+
 int in_range(reader_request_t *reader_request, tag_t *tag){
+//    return 1;
     //reader_request->posx
     //reader_request->posy
     //reader_request->elapsed_time
     //tag->posx
     //tag->posy
-    return 1;
+    double delta_x = (reader_request->posx + reader_request->start_time * reader_request->velocity) - tag->posx;
+    double delta_y = reader_request->posy - tag->posy;
+    double distance = sqrt(pow(delta_x, 2) + pow(delta_y, 2));
+    double degree = atan(fabs(delta_y)/fabs(delta_x));
+    if(distance < g_com_dist && degree < g_sys_fov){
+        if(be_blocked(reader_request, tag)){
+            return 0;
+        }else{
+            return 1;
+        }
+    }else{
+        return 0;
+    }   
 }
 
 void *tag_thread(void *arg){
 	tag_t *tag = create_tag();
     int conn = unix_domain_client_init(tag_proxy_path);
-    int pos = *((int *)arg);
-    tag_init(tag, conn, pos);
+    //int posx = *((int *)arg);
+    int posx = 0;
+    int posy = 0;
+    tag_init(tag, conn, posx, posy);
     reader_request_t *reader_request_tbl[READER_MAX_NUM] = {NULL};
     int in_range_req_num;
     while(1){
@@ -477,7 +502,7 @@ void *tag_thread(void *arg){
         if(memcmp((char *)req_bat, "RESET", strlen("RESET")) == 0){
             free(req_bat);
             printf("[%s]--RESET\n", __func__);
-            tag_init(tag, conn, pos);
+            tag_init(tag, conn, posx, posy);
             continue;
         }else if(memcmp((char *)req_bat, "KILL", strlen("KILL")) == 0){
             free(req_bat);
@@ -689,12 +714,19 @@ void usage(char *prog){
     printf("Usage:%s <reader_num> <tag_num> <spacing> <velocity>\n", prog);
 }
 
+
+//reader_num<int>
+//tag_num<int>
+//g_spaceing<double>
+
 int main(int argc, char *argv[]){
-    if(argc == 5){
+    if(argc == 4){
         reader_num = atoi(argv[1]);
         tag_num = atoi(argv[2]);
-        g_spacing = atoi(argv[3]);
-        g_velocity = atoi(argv[4]);
+        g_spacing = atof(argv[3]);
+//        g_velocity = atof(argv[4])/3600;
+        g_com_dist = 100.0;
+        g_sys_fov = 20.0;
     }else{
         usage(argv[0]);
         return 0;

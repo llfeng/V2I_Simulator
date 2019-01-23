@@ -34,6 +34,7 @@
 #include <fcntl.h>
 #include <time.h>
 #include <pthread.h>
+#include <math.h>
 #include "common.h"
 #include "log.h"
 
@@ -101,6 +102,7 @@ typedef struct{
     uint64_t elapsed_time;    
     int posx;
     int posy;
+    double velocity;
     int carrier_block_time;
     char last_collision_num;
     char last_query_addr;
@@ -194,6 +196,13 @@ uint64_t g_elapsed_time = 0;
 
 int reader_num;
 int tag_num;
+int g_lane_num;
+int g_velocity;         //unit--m/ms
+
+double g_com_dist;
+double g_sys_fov;
+
+
 
 reader_t reader_item_table[READER_MAX_NUM];
 
@@ -206,9 +215,16 @@ const char *reader_proxy_path = "reader_proxy.sock";
 const char *simulator_server_path = "server.socket";
 
 
-int gen_start_time(){
+int gen_init_time(){
     int slot_time = DOWN_SLOT_TIME;
     int offset = get_random()%DOWN_SLOT_TIME;
+    return offset + (get_random() % DOWNLINK_WINDOW) * DOWN_SLOT_TIME;
+}
+
+
+int gen_start_time(){
+    int slot_time = DOWN_SLOT_TIME;
+    int offset = 0;
     return offset + (get_random() % DOWNLINK_WINDOW) * DOWN_SLOT_TIME;
 }
 
@@ -402,13 +418,17 @@ void uplink_ack_handler(reader_t *reader){
 //如果有连续两个idle slot,就有可能发生downlink冲突(QUERY和DISCOVERY)
 
 
-void reader_init(reader_t *reader, int conn){
+void reader_init(reader_t *reader, int conn, int *arg_buf){
     reader->conn = conn;
     reader->addr = conn;
     reader->state = DISCOVERY_REQUEST;
     reader->ack = NACK;
     reader->query_addr = 0;
     reader->query_addr = 0;
+
+    reader->posx = arg_buf[0];
+    reader->posy = arg_buf[1];
+
 //    reader->tag_addr_range = 1;
     reader->collision_num = 0;
     reader->last_collision_num = 0;
@@ -417,7 +437,8 @@ void reader_init(reader_t *reader, int conn){
     memset(reader->pair, 0, sizeof(reader->pair));
     reader->plen = 0;
     memset(reader->payload, 0, sizeof(reader->payload));
-    reader->start_time += gen_start_time();
+    reader->start_time += gen_init_time();
+    reader->velocity = g_velocity;
 }
 
 #if 1
@@ -513,9 +534,29 @@ void update_test_tab(reader_t *reader, char tag_uuid){
     }
 }
 
+int be_blocked(reader_request_t *reader_request, tag_response_t *tag_response){
+    return 0;
+}
 
 int in_range(reader_request_t *reader_request, tag_response_t *tag_response){
-    return 1;
+//    return 1;
+    //distance
+    //fov
+    //blockage
+    double delta_x = reader_request->posx - tag_response->posx;
+    double delta_y = reader_request->posy - tag_response->posy;
+    double distance = sqrt(pow(delta_x, 2) + pow(delta_y, 2));
+    double degree = atan(fabs(delta_y)/fabs(delta_x));
+    LOG(DEBUG, "[%d]--(%d,%d), distance:%lf, degree:%lf, g_com_dist:%lf, g_sys_fov:%lf", reader_request->addr, reader_request->posx, reader_request->posy,distance,degree, g_com_dist, g_sys_fov);
+    if(distance < g_com_dist && degree < g_sys_fov){
+        if(be_blocked(reader_request, tag_response)){
+            return 0;
+        }else{
+            return 1;
+        }
+    }else{
+        return 0;
+    }
 }
 
 
@@ -548,6 +589,7 @@ void handler_tag_response(tag_response_t *tag_response_tbl, reader_t *reader, in
             }
     }else{
         reader->carrier_block_time = tag_response_tbl[0].start_time + (tag_response_tbl[rsp_num - 1].plen << 3) * 1000/UPLINK_BITRATE;
+//        LOG(INFO, "carrier_block_time:%d, tag_response_tbl[0].start_time:%d, tag_response_tbl[rsp_num - 1].plen:%d", reader->carrier_block_time, tag_response_tbl[0].start_time, tag_response_tbl[rsp_num - 1].plen);
         if(get_dst_addr(&tag_response_tbl[0]) == reader->addr){
             uplink_data_handler(reader, &tag_response_tbl[0]);
         }else{
@@ -562,6 +604,7 @@ reader_request_t *gen_reader_request(reader_t *reader){
     reader_request->addr = reader->addr;
     reader_request->posx = reader->posx;
     reader_request->posy = reader->posy;
+    reader_request->velocity = reader->velocity;
     reader_request->start_time = reader->start_time;
     reader_request->plen = enframe(reader, reader_request->payload);
 
@@ -642,11 +685,14 @@ void handler_no_response(reader_t *reader){
 }
 
 
-void *reader_thread(void *){
+void *reader_thread(void *arg){
     reader_t *reader = create_reader();
     int conn = unix_domain_client_init(reader_proxy_path);
-    printf("conn:%d\n", conn);
-    reader_init(reader, conn);
+
+    int *arg_buf = (int *)arg;
+    reader_init(reader, conn, arg_buf);
+
+    printf("conn:%d, (%d, %d)\n", conn, reader->posx, reader->posy);
 
     char log_str[2048] = {0};
     char tmp_str[512] = {0};
@@ -721,13 +767,12 @@ void do_handler(req_bat_t *sent_req_bat,
         to_reader_rsp_bat->num = 0;
         to_reader_rsp_bat->sent = 1;
         for(int j = 0; j < rsp_bat->num; j++){
-//            LOG(DEBUG, "rsp_bat->num:%d", rsp_bat->num);
             if(in_range(&sent_req_bat->req[i], &rsp_bat->rsp[j])){                
+                LOG(INFO, "[%d] is in range.", sent_req_bat->req[i].addr);
                 memcpy(&to_reader_rsp_bat->rsp[to_reader_rsp_bat->num++], &rsp_bat->rsp[j], sizeof(tag_response_t)); 
             }
         }
         write(sent_req_bat->req[i].conn, (char *)to_reader_rsp_bat, sizeof(rsp_bat_t));
-//        LOG(DEBUG, "SEND to reader");
         free(to_reader_rsp_bat);
     }
     sent_req_bat->num = 0;
@@ -738,6 +783,7 @@ void do_handler(req_bat_t *sent_req_bat,
         to_reader_rsp_bat->sent = 0;
         for(int j = 0; j < rsp_bat->num; j++){
             if(in_range(&ready_req_bat->req[i], &rsp_bat->rsp[j])){
+                LOG(INFO, "[%d] is in range.", sent_req_bat->req[i].addr);
                 memcpy(&to_reader_rsp_bat->rsp[to_reader_rsp_bat->num++], &rsp_bat->rsp[j], sizeof(tag_response_t)); 
             }
         }
@@ -754,7 +800,7 @@ int is_blocked(tag_response_t *rsp){
 
 //proxy define 
 #define COLLISION   1
-void *reader_proxy(void *){
+void *reader_proxy(void *arg){
 
     int reader_conn[READER_MAX_NUM];    
     memset(reader_conn, 0, sizeof(reader_t));
@@ -762,8 +808,9 @@ void *reader_proxy(void *){
 	int local_serverfd = unix_domain_server_init(reader_proxy_path);
 	
 	pthread_t *thread_tab = (pthread_t *)malloc(sizeof(pthread_t)*reader_num);
+    int *arg_buf = (int *)arg;
     for(int i = 0; i < reader_num; i++){
-        pthread_create(&thread_tab[i], NULL, reader_thread, NULL);
+        pthread_create(&thread_tab[i], NULL, reader_thread, &arg_buf[i*2]);
     }   
 
     int remote_clientfd = unix_domain_client_init(simulator_server_path);
@@ -877,11 +924,29 @@ void *reader_proxy(void *){
 
 }
 
+//reader_num<int>
+//tag_num<int>
+//lane_num<int>
+//velocity<float>
+//reader_position<(double x, double y)>
 
 int main(int argc, char *argv[]){
-    if(argc == 3){ 
+    int *pos_buf = NULL;
+    if(argc == 5){ 
         reader_num = atoi(argv[1]);
         tag_num = atoi(argv[2]);
+        g_lane_num = atoi(argv[3]);
+        g_velocity = atof(argv[4])/3600;    
+
+        g_com_dist = 100.0;
+        g_sys_fov = 20.0;
+        pos_buf = (int *)malloc(reader_num * 2 * sizeof(int));
+        printf("pos\n");
+        for(int i = 0; i < reader_num; i++){
+            pos_buf[i*2] = -40 * (i+1);
+            pos_buf[i*2+1] = 0;
+            printf("%d, %d\n", pos_buf[i*2], pos_buf[i*2+1]);
+        }
     }else{
         usage(argv[0]);
         return 0;
@@ -894,7 +959,7 @@ int main(int argc, char *argv[]){
     trace_fd = unix_domain_client_init(trace_sock_path);
 
     pthread_t thread_proxy;
-    pthread_create(&thread_proxy, NULL, reader_proxy, NULL);
+    pthread_create(&thread_proxy, NULL, reader_proxy, (void *)pos_buf);
 
 /* 
     pthread_t *thread_tab = (pthread_t *)malloc(sizeof(pthread_t)*reader_num);

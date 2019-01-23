@@ -34,7 +34,8 @@
 #define UPLINK_ACK_TIME 24  //preamble
 
 
-#define DOWNLINK_WINDOW 8
+//#define DOWNLINK_WINDOW 8
+#define DOWNLINK_WINDOW 4
 #define DOWNLINK_BITRATE 10000
 
 #define DOWN_SLOT_TIME   ((DEFAULT_DOWNLINK_LEN << 3)*1000/DOWNLINK_BITRATE)
@@ -54,6 +55,8 @@
 #define DATA        2
 
 typedef struct{
+    int posx;
+    int posy;
     int type;
     int plen;
     int start_time;
@@ -69,6 +72,7 @@ typedef struct{
     int start_time;
     int backoff_time;
     int elapsed_time;
+    double velocity;
     char payload[32];
 }reader_request_t; 
 
