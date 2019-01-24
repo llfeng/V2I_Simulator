@@ -112,6 +112,6 @@ void get_send_pos(reader_request_t *reader_request, int *x, int *y){
 
 void get_recv_pos(reader_request_t *reader_request, tag_response_t *tag_response, int *x, int *y){
     *x = reader_request->posx + (tag_response->start_time + (tag_response->plen << 3)*1000/DOWNLINK_BITRATE - reader_request->init_time) * reader_request->velocity;
-    *y - reader_request->posy;
+    *y = reader_request->posy;
 }
 

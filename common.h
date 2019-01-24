@@ -19,8 +19,6 @@
 #ifndef __COMMON_H__
 #define __COMMON_H__
 
-#define REQ_MAX_NUM READER_MAX_NUM
-#define RSP_MAX_NUM TAG_MAX_NUM
 
 
 #define USE_ROUND_ADDR  1
@@ -42,17 +40,23 @@
 
 #define UPLINK_BITRATE  256
 
-#define FRAME_MAX_LEN   32
-#define PAYLOAD_MAX_LEN 24
+#define FRAME_MAX_LEN   72
+#define PAYLOAD_MAX_LEN 64
 
 #define READER_MAX_NUM  100
-#define TAG_MAX_NUM  10
+#define TAG_MAX_NUM  50
 
+
+#define REQ_MAX_NUM READER_MAX_NUM
+#define RSP_MAX_NUM TAG_MAX_NUM
 
 
 //response type
 #define DISC_ACK    1
 #define DATA        2
+
+#define UPLINK_CANNOT_OUT   0xFF
+
 
 typedef struct{
     int posx;
@@ -60,7 +64,7 @@ typedef struct{
     int type;
     int plen;
     int start_time;
-    char payload[32];
+    char payload[PAYLOAD_MAX_LEN];
 }tag_response_t;
 
 typedef struct{
@@ -74,7 +78,7 @@ typedef struct{
     int backoff_time;
     int elapsed_time;
     double velocity;
-    char payload[32];
+    char payload[PAYLOAD_MAX_LEN];
 }reader_request_t; 
 
 

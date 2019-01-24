@@ -36,11 +36,13 @@
 #include "log.h"
 #include "is_available.h"
 
+#ifdef LOG_LEVEL
+#undef LOG_LEVEL
+#endif
+#define LOG_LEVEL   FATAL
 
 #define USE_ROUND_ADDR 1
 
-#define FRAME_MAX_LEN   32
-#define PAYLOAD_MAX_LEN 24
 
 //#define READER_MAX_NUM  10
 //#define TAG_MAX_NUM  10
@@ -151,11 +153,35 @@ int trace_fd = -1;
 
 #if USE_ROUND_ADDR
 void update_alias(tag_t *tag, char reader_addr, char short_addr, char round, int time){
-    tag->alias[tag->alias_num].reader = reader_addr;
-    tag->alias[tag->alias_num].tag = short_addr;
-    tag->alias[tag->alias_num].round = round;
-    tag->alias[tag->alias_num].time = time;
-    tag->alias_num++;
+    int exist_flag = 0;
+    for(int i = 0; i < tag->alias_num; i++){
+        if(reader_addr == tag->alias[i].reader){
+            tag->alias[i].tag = short_addr;
+            tag->alias[i].round = round;
+            tag->alias[i].time = time;
+            exist_flag = 1;
+            break;
+        }
+    }
+    if(exist_flag == 0){
+        tag->alias[tag->alias_num].reader = reader_addr;
+        tag->alias[tag->alias_num].tag = short_addr;
+        tag->alias[tag->alias_num].round = round;
+        tag->alias[tag->alias_num].time = time;
+        tag->alias_num++;
+    }
+
+    if(tag->alias_num > READER_MAX_NUM){
+        printf("silent_table:\n");
+        for(int i = 0; i < tag->silent_num; i++){
+            printf("reader:%d, time:%d\n", tag->silent[i].reader, tag->silent[i].time);
+        }
+        printf("alias_table:\n");
+        for(int i = 0; i < tag->alias_num; i++){
+            printf("reader:%d, tag:%d, round:%d, vaild:%d, time:%d\n", tag->alias[i].reader, tag->alias[i].tag, tag->alias[i].round, tag->alias[i].vaild, tag->alias[i].time);
+        }
+    }
+    printf("tag->alias_num:%d", tag->alias_num);
 }
 #else
 void update_alias(tag_t *tag, char reader_addr, char short_addr){
@@ -243,6 +269,7 @@ void send_to_proxy(tag_t *tag){
     rsp->start_time = tag->start_time;
     rsp->posx = tag->posx;
     rsp->posy = tag->posy;
+    rsp->type = DATA;
     
     int sent_bytes = write(tag->conn, (char *)rsp, sizeof(tag_response_t));
     free(rsp);
@@ -310,6 +337,13 @@ void check_silent(tag_t *tag, int cur_time){
     }
 }
 
+void send_nop_to_proxy(tag_t *tag){
+    tag_response_t *rsp = (tag_response_t *)malloc(sizeof(tag_response_t));
+    rsp->type = UPLINK_CANNOT_OUT; 
+    write(tag->conn, (char *)rsp, sizeof(tag_response_t));
+    free(rsp);
+}
+
 
 #if USE_ROUND_ADDR
 void parse_downlink(tag_t *tag, reader_request_t *req){     //mac
@@ -320,6 +354,8 @@ void parse_downlink(tag_t *tag, reader_request_t *req){     //mac
     char tag_addr = buf[1] & 0x0F;
     char round = buf[2];
 
+
+    LOG(CRIT, "1---tag->posx:%d", tag->posx);
 
     tag->start_time = req->start_time + (req->plen << 3) * 1000/DOWNLINK_BITRATE;
 
@@ -350,9 +386,11 @@ void parse_downlink(tag_t *tag, reader_request_t *req){     //mac
         default:
             break;
     }
+    LOG(CRIT, "2---tag->posx:%d", tag->posx);
 
     if(frame_state == DISCOVERY_REQUEST){
         char plen = buf[3] & 0x0F;
+        LOG(CRIT, "3---tag->posx:%d", tag->posx);
         LOG(INFO, "%ld--recv:%02x %02x %02x %02x", time(NULL), buf[0], buf[1], buf[2], buf[3]);
         for(int i = 0; i < plen; i += 3){
             //LOG(INFO, "%02x %02x ", buf[i+4], buf[i+5]);
@@ -360,7 +398,9 @@ void parse_downlink(tag_t *tag, reader_request_t *req){     //mac
                 keep_silent(tag, reader_addr, tag->start_time);
             }
         }
+        LOG(CRIT, "4---tag->posx:%d", tag->posx);
         if(is_silent(tag, reader_addr) == 1){
+            send_nop_to_proxy(tag);
             //do nothing
 //            delete_alias(tag, reader_addr);
         }else{
@@ -371,15 +411,24 @@ void parse_downlink(tag_t *tag, reader_request_t *req){     //mac
             }else{
                 addr_range = 2 * collision_num;
             }
+            LOG(CRIT, "5---tag->posx:%d", tag->posx);
             char short_addr = get_random()%addr_range;            
             LOG(INFO, "short_addr:%d", short_addr);
             update_alias(tag, reader_addr, short_addr, round, tag->start_time);
+            LOG(CRIT, "6---tag->posx:%d", tag->posx);
             if(short_addr == 0){
                 tag->addr = short_addr;
                 tag->dst = reader_addr;
                 tag->round = round;
                 tag->start_time += ENERGY_CHECK_TIME;
                 send_to_proxy(tag);
+                LOG(CRIT, "tag->posx:%d", tag->posx);
+                if(tag->posx< 100){
+                    printf("HHAHHAi\n");
+                    while(1);
+                }
+            }else{
+                send_nop_to_proxy(tag);
             }
         }
     }else{  //QUERY_REQUEST
@@ -389,6 +438,8 @@ void parse_downlink(tag_t *tag, reader_request_t *req){     //mac
             tag->dst = reader_addr;
             tag->round = round;
             send_to_proxy(tag);
+        }else{
+            send_nop_to_proxy(tag);
         }
     }
 }
@@ -437,8 +488,9 @@ void parse_downlink(tag_t *tag, char *buf){     //mac
             }
         }
         printf("---]\n");
-        if(is_silent(tag, reader_addr) == 1){
+        if(is_silent(tag, reader_addr) == 1){       //if the tag has been kept silent by this reader
             delete_alias(tag, reader_addr);
+            send_nop_to_proxy(tag);
         }else{
             char addr_range = 0;
             char collision_num = buf[2] >> 4;
@@ -450,10 +502,12 @@ void parse_downlink(tag_t *tag, char *buf){     //mac
             char short_addr = get_random()%addr_range;            
             printf("[short_addr:%d]\n", short_addr);
             update_alias(tag, reader_addr, short_addr);
-            if(short_addr == 0){
+            if(short_addr == 0){                //if shortaddr=0, then send the uplink to reader
                 tag->addr = short_addr;
                 tag->dst = reader_addr;
                 send_to_proxy(tag);
+            }else{
+                send_nop_to_proxy(tag);
             }
         }
     }else{  //QUERY_REQUEST
@@ -462,7 +516,9 @@ void parse_downlink(tag_t *tag, char *buf){     //mac
             tag->addr = tag_addr;
             tag->dst = reader_addr;
             send_to_proxy(tag);
-        }
+        }else{
+            send_nop_to_proxy(tag);
+        }        
     }
     printf("[after]:");
 /*
@@ -530,6 +586,7 @@ int in_range(reader_request_t *reader_request, tag_t *tag){
     }   
 }
 
+
 void *tag_thread(void *arg){
 	tag_t *tag = create_tag();
     int conn = unix_domain_client_init(tag_proxy_path);
@@ -553,6 +610,8 @@ void *tag_thread(void *arg){
             break;
         }else{
 
+            pthread_mutex_lock(&tag_mutex);
+
             vector<Point> lights;
             for(int k = 0; k < req_bat->num; k++){
                 int x,y;
@@ -568,7 +627,11 @@ void *tag_thread(void *arg){
                 int x,y;
                 get_send_pos(&req_bat->req[i], &x, &y);
                 lights.push_back(Point(x, y));
-#if 0
+#if 1
+                if(tag->posx < 100){
+                    printf("ERROR HERE!\n");
+                    while(1);
+                }
                 if(in_range(&req_bat->req[i], tag) && !is_intersect(lights, Point(tag->posx, tag->posy), lights.size())){
                     in_range_req_num++;
                     in_range_req = &req_bat->req[i];
@@ -582,13 +645,17 @@ void *tag_thread(void *arg){
                 lights.pop_back();
             }
             if(in_range_req_num > 1){
+                send_nop_to_proxy(tag);
                 //downlink collision
             }else if(in_range_req_num == 1){
                 parse_downlink(tag, in_range_req);      //parse downlink and send response 
             }else{
+                send_nop_to_proxy(tag);
                 //out of range
             }
+            pthread_mutex_unlock(&tag_mutex);
         }
+        free(req_bat);
     }
 
 }
@@ -606,6 +673,7 @@ void send_to_tag(tag_info_t *tag_info, char *buf, int buflen){
 #define UPLINK_DATA         3
 
 
+/* 
 void send_collision_to_reader(int remote_conn){
     tag_response_t msg;
     memset(&msg, 0, sizeof(tag_response_t));
@@ -628,7 +696,9 @@ void send_data_to_reader(tag_info_t tag_info, int remote_conn){
     memcpy(msg.payload, tag_info.payload, tag_info.plen);
     write(remote_conn, (char *)&msg, sizeof(tag_response_t));
 }
+*/
 
+/*
 void tag_info_handler(tag_info_t *tag_info, int remote_conn){
     char addr_slot[32];
     memset(addr_slot, 0, sizeof(addr_slot));
@@ -669,6 +739,7 @@ void tag_info_handler(tag_info_t *tag_info, int remote_conn){
         memset(tag_info[i].payload, 0, sizeof(tag_info[i].payload));
     }
 }
+*/
 
 void *tag_proxy(void *arg){
     int tag_pos[TAG_MAX_NUM];
@@ -716,32 +787,39 @@ void *tag_proxy(void *arg){
                     write(tag_conn[i], (char *)req_bat, sizeof(req_bat_t));
                 }
                 
-                while(1){
+                int receive_remain = tag_num;
+                while(receive_remain){
                     fd_set tag_fds;
                     int tag_maxfd = -1;
-                    struct timeval tag_tv;
-                    tag_tv.tv_sec = 1;
-                    tag_tv.tv_usec = 0;
                     FD_ZERO(&tag_fds);
                     for(int i = 0; i < tag_num; i++){
                         FD_SET(tag_conn[i], &tag_fds);
                         tag_maxfd = tag_maxfd > tag_conn[i] ? tag_maxfd : tag_conn[i];
                     }
-                    int tag_ret = select(tag_maxfd + 1, &tag_fds, NULL, NULL, &tag_tv);     //3.wait for tag response, then send to reader proxy
+                    int tag_ret = select(tag_maxfd + 1, &tag_fds, NULL, NULL, NULL);     //3.wait for tag response, then send to reader proxy
                     if(tag_ret > 0){
                         for(int i = 0; i < tag_num; i++){
                             if(FD_ISSET(tag_conn[i], &tag_fds)){
-                                read(tag_conn[i], (char *)&rsp_bat->rsp[rsp_bat->num++], sizeof(tag_response_t));    
+                                receive_remain--;
+                                tag_response_t tag_rsp;
+                                read(tag_conn[i], (char *)&tag_rsp, sizeof(tag_response_t));    
+                                if(tag_rsp.type == UPLINK_CANNOT_OUT){
+                                    
+                                }else{
+                                    memcpy(&rsp_bat->rsp[rsp_bat->num++], (char *)&tag_rsp, sizeof(tag_response_t));
+                                }
                             }
                         }
+                        LOG(DEBUG, "receive_remain:%d, rsp_bat->num:%d", receive_remain, rsp_bat->num);
                     }else if(tag_ret == 0){
                         LOG(DEBUG, "rsp_bat->num:%d", rsp_bat->num);
-                        write(remote_conn, (char *)rsp_bat, sizeof(rsp_bat_t));
+                        //write(remote_conn, (char *)rsp_bat, sizeof(rsp_bat_t));
                         break;                        
                     }else{
                         //something error!
                     }
                 }
+                write(remote_conn, (char *)rsp_bat, sizeof(rsp_bat_t));
             }
 
 #if 0
@@ -764,6 +842,8 @@ void *tag_proxy(void *arg){
             }
 #endif            
         }
+        free(req_bat);
+        free(rsp_bat);
     
     }
     for(int i = 0; i < tag_num; i++){
