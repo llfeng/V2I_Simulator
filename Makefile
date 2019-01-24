@@ -1,10 +1,10 @@
 
 all: tag reader trace
 
-tag: tag.cpp common.cpp
-	g++ tag.cpp common.cpp -o tag -lpthread
-reader: reader.cpp common.cpp
-	g++ reader.cpp common.cpp -o reader -lpthread
+tag: tag.cpp common.cpp is_available.cpp
+	g++ tag.cpp common.cpp is_available.cpp -o tag -lpthread -std=c++11
+reader: reader.cpp common.cpp is_available.cpp
+	g++ reader.cpp common.cpp is_available.cpp -o reader -lpthread -std=c++11
 trace: trace.cpp common.cpp
 	g++ trace.cpp common.cpp -o trace
 

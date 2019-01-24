@@ -19,8 +19,8 @@
 #ifndef __COMMON_H__
 #define __COMMON_H__
 
-#define REQ_MAX_NUM 4
-#define RSP_MAX_NUM 6
+#define REQ_MAX_NUM READER_MAX_NUM
+#define RSP_MAX_NUM TAG_MAX_NUM
 
 
 #define USE_ROUND_ADDR  1
@@ -45,7 +45,7 @@
 #define FRAME_MAX_LEN   32
 #define PAYLOAD_MAX_LEN 24
 
-#define READER_MAX_NUM  10
+#define READER_MAX_NUM  100
 #define TAG_MAX_NUM  10
 
 
@@ -70,6 +70,7 @@ typedef struct{
     int posy;
     int plen;
     int start_time;
+    int init_time;
     int backoff_time;
     int elapsed_time;
     double velocity;
@@ -112,5 +113,10 @@ extern void destroy_random();
 extern int unix_domain_server_init(const char *path);
 
 extern int unix_domain_client_init(const char *path);
+
+extern void get_send_pos(reader_request_t *reader_request, int *x, int *y);
+
+extern void get_recv_pos(reader_request_t *reader_request, tag_response_t *tag_response, int *x, int *y);
+
 
 #endif
