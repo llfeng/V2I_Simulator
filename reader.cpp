@@ -44,6 +44,10 @@
 using namespace std;
 
 
+int g_receive_item_count = 0;
+#define LOG_FETCH_ITEM  100
+
+
 #define PI 3.141592654
 
 
@@ -118,6 +122,7 @@ typedef struct{
     addr_pair_t last_pair[TAG_MAX_NUM];
     char received_id[TAG_MAX_NUM];
     char received_num;
+    int die_flag;
 }reader_t;
 
 typedef struct{
@@ -320,6 +325,7 @@ int get_tag_addr_range(reader_t *reader){
 
 void uplink_collision_handler(reader_t *reader){
     reader->collision_num++;
+    LOG(CRIT, "uplink collision happen, collision number:%d", reader->collision_num);
     reader->query_addr++;
     int tag_addr_range = get_tag_addr_range(reader);
     if(reader->query_addr == tag_addr_range){
@@ -394,6 +400,10 @@ void record_log(reader_t *reader, tag_response_t *tag_response){
     RECORD_TRACE(g_log_file_fd, log_s, "[%4d-%02d-%02d %02d:%02d:%02d] time:%d--tag[%d](%d, %d) ---> reader[%d](%f, %d). comm_dist:%fm, remain_dist:%fm, com_x_left:%f, com_x_right:%f\n", ttt.tm_year + 1900, ttt.tm_mon + 1, ttt.tm_mday, ttt.tm_hour,ttt.tm_min, ttt.tm_sec,
             delta_t + reader->init_time, get_tag_uuid(tag_response), tag_response->posx, tag_response->posy, reader->addr, x, reader->posy, com_x_left-com_x_right, tag_response->posx - x - com_x_right, com_x_left, com_x_right);
     RECORD_TRACE(g_res_file_fd, res_s, "%d, %f, %f\n", reader->posy, com_x_left-com_x_right, tag_response->posx - x - com_x_right);
+    if(g_receive_item_count > LOG_FETCH_ITEM){
+        reader->die_flag = 1;
+    }
+    g_receive_item_count++;
 }
 
 void uplink_data_handler(reader_t *reader, tag_response_t *tag_response){
@@ -518,6 +528,7 @@ void reader_init(reader_t *reader, int conn, int *arg_buf){
     reader->velocity = g_velocity;
     memset(reader->received_id, 0, sizeof(reader->received_id));
     reader->received_num = 0;
+    reader->die_flag = 0;
 }
 
 #if 1
@@ -529,7 +540,7 @@ int enframe(reader_t *reader, char *txbuf){
     if(reader->state == DISCOVERY_REQUEST){
         txbuf[2] = reader->round;
         txbuf[3] = (reader->collision_num << 4);
-        txbuf[3] += reader->pair_num * 3;        
+        txbuf[3] += reader->pair_num;        
         for(int i = 0; i < reader->pair_num; i++){
             txbuf[i*3+4] = reader->pair[i].reader;
             txbuf[i*3+5] = reader->pair[i].tag;
@@ -632,7 +643,7 @@ int in_range(reader_request_t *reader_request, tag_response_t *tag_response){
     //distance
     //fov
     //blockage
-    int cur_posx = reader_request->posx + (tag_response->start_time + (tag_response->plen << 3)*1000/DOWNLINK_BITRATE - reader_request->init_time) * reader_request->velocity;
+    int cur_posx = reader_request->posx + (tag_response->start_time + (tag_response->plen << 3)*1000/UPLINK_BITRATE - reader_request->init_time) * reader_request->velocity;
     //double delta_x = reader_request->posx  - tag_response->posx;
     double delta_x = cur_posx  - tag_response->posx;
     if(delta_x > 0){
@@ -641,12 +652,13 @@ int in_range(reader_request_t *reader_request, tag_response_t *tag_response){
     double delta_y = reader_request->posy - tag_response->posy;
     double distance = sqrt(pow(delta_x, 2) + pow(delta_y, 2));
     double degree = atan(fabs(delta_y)/fabs(delta_x));
-    //LOG(DEBUG, "[%d]--tag(%d, %d)-->reader(%d,%d), distance:%lf, degree:%lf, g_com_dist:%lf, g_sys_fov:%lf", reader_request->addr, tag_response->posx, tag_response->posy,
-    //cur_posx, reader_request->posy,distance,degree, g_com_dist, g_sys_fov);
-    if(distance < g_com_dist_up && degree < g_sys_fov){
+    
+    if(distance < g_com_dist_up && degree < g_sys_fov && delta_x < 0){
         if(be_blocked(reader_request, tag_response)){
             return 0;
         }else{
+//            LOG(DEBUG, "rsp_start_time:%d, tag[%d](%d, %d)-->reader[%d](%d,%d), distance:%lf, degree:%lf, g_com_dist:%lf, g_sys_fov:%lf", tag_response->start_time, get_tag_uuid(tag_response), tag_response->posx, tag_response->posy,
+//                    reader_request->addr,cur_posx, reader_request->posy,distance,degree, g_com_dist_up, g_sys_fov);
             return 1;
         }
     }else{
@@ -842,6 +854,9 @@ void *reader_thread(void *arg){
     tag_response_t *tag_response_tbl[TAG_MAX_NUM] = {NULL};
     rsp_bat_t *tag_rsp_bat = (rsp_bat_t *)malloc(sizeof(rsp_bat_t));
     while(1){
+        if(reader->die_flag){
+            break;
+        }
         int rsp_num = 0;
         
         memset(tag_rsp_bat, 0, sizeof(rsp_bat_t));
@@ -932,12 +947,16 @@ void do_handler(req_bat_t *sent_req_bat,
                 sprintf(p_str, "%s %02x", p_str, rsp_bat->rsp[j].payload[k]);
             }
 
-//            if(in_range(&sent_req_bat->req[i], &rsp_bat->rsp[j])){                
-            if(in_range(&sent_req_bat->req[i], &rsp_bat->rsp[j]) && !is_intersect(lights, Point(rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy), lights.size())){                
-//                LOG(INFO, "sent-reader[%3d]  is [in-view ]. reader(%3d, %3d)<----tag(%3d, %3d), rsp_start_time:%10d, receive data:%s", sent_req_bat->req[i].addr, x, y, rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy, rsp_bat->rsp[j].start_time, p_str);                
-                memcpy((char *)&(to_reader_rsp_bat->rsp[to_reader_rsp_bat->num++]), (char *)&(rsp_bat->rsp[j]), sizeof(tag_response_t)); 
+            if(in_range(&sent_req_bat->req[i], &rsp_bat->rsp[j])){                
+//            if(in_range(&sent_req_bat->req[i], &rsp_bat->rsp[j]) && !is_intersect(lights, Point(rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy), lights.size())){                
+                if(!is_intersect(lights, Point(rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy), lights.size())){
+                    LOG(INFO, "sent-reader[%3d]  is [in-view ]. reader(%3d, %3d)<----tag(%3d, %3d), rsp_start_time:%10d, receive data:%s", sent_req_bat->req[i].addr, x, y, rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy, rsp_bat->rsp[j].start_time, p_str);                
+                    memcpy((char *)&(to_reader_rsp_bat->rsp[to_reader_rsp_bat->num++]), (char *)&(rsp_bat->rsp[j]), sizeof(tag_response_t)); 
+                }else{
+                    LOG(INFO, "sent-reader[%3d]  is [in-view but intersect]. reader(%3d, %3d)<----tag(%3d, %3d), rsp_start_time:%10d, receive data:%s", sent_req_bat->req[i].addr, x, y, rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy, rsp_bat->rsp[j].start_time, p_str);                
+                }
             }else{
-                //LOG(INFO, "sent-reader[%3d]  is [out-view]. reader(%3d, %3d)<----tag(%3d, %3d), rsp_start_time:%10d, receive data:%s", sent_req_bat->req[i].addr, x, y, rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy, rsp_bat->rsp[j].start_time, p_str);
+//                LOG(INFO, "sent-reader[%3d]  is [out-view]. reader(%3d, %3d)<----tag(%3d, %3d), rsp_start_time:%10d, receive data:%s", sent_req_bat->req[i].addr, x, y, rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy, rsp_bat->rsp[j].start_time, p_str);
             }
         }
 
@@ -979,12 +998,16 @@ void do_handler(req_bat_t *sent_req_bat,
                 sprintf(p_str, "%s %02x", p_str, rsp_bat->rsp[j].payload[k]);
             }
 #if 1
-//            if(in_range(&ready_req_bat->req[i], &rsp_bat->rsp[j])){                
-            if(in_range(&ready_req_bat->req[i], &rsp_bat->rsp[j]) && !is_intersect(lights, Point(rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy), lights.size())){                
-//                LOG(INFO, "ready-reader[%3d] is [in-view ]. reader(%3d, %3d)<----tag(%3d, %3d), rsp_start_time:%10d, receive data:%s", sent_req_bat->req[i].addr, x, y, rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy, rsp_bat->rsp[j].start_time, p_str);
-                memcpy((char *)&(to_reader_rsp_bat->rsp[to_reader_rsp_bat->num++]), (char *)&(rsp_bat->rsp[j]), sizeof(tag_response_t)); 
+            if(in_range(&ready_req_bat->req[i], &rsp_bat->rsp[j])){                
+//            if(in_range(&ready_req_bat->req[i], &rsp_bat->rsp[j]) && !is_intersect(lights, Point(rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy), lights.size())){                
+                if(!is_intersect(lights, Point(rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy), lights.size())){
+                    LOG(INFO, "ready-reader[%3d] is [in-view ]. reader(%3d, %3d)<----tag(%3d, %3d), rsp_start_time:%10d, receive data:%s", ready_req_bat->req[i].addr, x, y, rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy, rsp_bat->rsp[j].start_time, p_str);
+                    memcpy((char *)&(to_reader_rsp_bat->rsp[to_reader_rsp_bat->num++]), (char *)&(rsp_bat->rsp[j]), sizeof(tag_response_t)); 
+                }else{
+                    LOG(INFO, "ready-reader[%3d] is [in-view but intersect]. reader(%3d, %3d)<----tag(%3d, %3d), rsp_start_time:%10d, receive data:%s", ready_req_bat->req[i].addr, x, y, rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy, rsp_bat->rsp[j].start_time, p_str);
+                }
             }else{
-                //LOG(INFO, "ready-reader[%3d] is [out-view]. reader(%3d, %3d)<----tag(%3d, %3d), rsp_start_time:%10d, receive data:%s", sent_req_bat->req[i].addr, x, y, rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy, rsp_bat->rsp[j].start_time, p_str);
+//                LOG(INFO, "ready-reader[%3d] is [out-view]. reader(%3d, %3d)<----tag(%3d, %3d), rsp_start_time:%10d, receive data:%s", sent_req_bat->req[i].addr, x, y, rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy, rsp_bat->rsp[j].start_time, p_str);
             }
 #endif            
         }
@@ -1146,6 +1169,9 @@ void *reader_proxy(void *arg){
     trigger_reader(reader_conn);
     LOG(INFO, "TRIGGER OK");
     while(1){
+        if(g_receive_item_count>LOG_FETCH_ITEM){
+            break;
+        }
         fd_set fds;
         FD_ZERO(&fds);
         int maxfd = -1;
@@ -1243,7 +1269,6 @@ void *reader_proxy(void *arg){
             pthread_join(thread_tab[i][j], NULL);
         }
     }   
-    free(thread_tab);
 
     close(local_serverfd);
     close(remote_clientfd);
@@ -1275,7 +1300,7 @@ int main(int argc, char *argv[]){
         g_com_dist_down = g_com_dist_up = 100.0;
         g_sys_fov = 20.0/2*PI/180;
 
-        g_car_num_per_lane = 5;
+        g_car_num_per_lane = 10;
         g_car_dist = 50;
 
         reader_num = g_car_num_per_lane * g_lane_num;
