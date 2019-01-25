@@ -6,6 +6,7 @@
 using std::max;
 using std::min;
 
+
 const double EPS = 1e-8;
 
 // 定义在cpp里面从而隐藏他们
@@ -68,10 +69,16 @@ Vehicle::Vehicle(const Point &light_) {
 	light = light_;
 	Point l = light + Point(-EPS, 0);
 	
+#if 0    
 	Point	a(l + Point(0, -1.5)),
 		b(l + Point(0, 1.5)),
 		c(l + Point(-5, 1.5)),
 		d(l + Point(-5, -1.5));
+#endif       
+	Point	a(l + Point(0, -VEHICLE_WIDTH/2)),
+		b(l + Point(0, VEHICLE_WIDTH/2)),
+		c(l + Point(-VEHICLE_LENGTH, VEHICLE_WIDTH/2)),
+		d(l + Point(-VEHICLE_LENGTH, -VEHICLE_WIDTH/2));
 	car_lines[0] = Line(a, b);
 	car_lines[1] = Line(b, c);
 	car_lines[2] = Line(c, d);

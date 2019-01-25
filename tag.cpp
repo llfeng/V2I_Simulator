@@ -122,8 +122,8 @@ typedef struct{
     char txbuf[FRAME_MAX_LEN];
     char alias_num;
     tag_alias_t alias[READER_MAX_NUM];
-    int posx;
-    int posy;
+    double posx;
+    double posy;
     int start_time;
 }tag_t;
 
@@ -427,10 +427,6 @@ void parse_downlink(tag_t *tag, reader_request_t *req){     //mac
                 tag->round = round;
                 tag->start_time += ENERGY_CHECK_TIME;
                 send_to_proxy(tag);
-                if(tag->posx< 100){
-                    printf("HHAHHAi\n");
-                    while(1);
-                }
             }else{
                 send_nop_to_proxy(tag);
             }
@@ -455,7 +451,7 @@ tag_t *create_tag(){
     return tag;
 }
 
-void tag_init(tag_t *tag, int conn, int posx, int posy){
+void tag_init(tag_t *tag, int conn, double posx, double posy){
     tag->alias_num = 0;
     memset(tag->alias, 0, sizeof(tag->alias));
 
@@ -482,7 +478,7 @@ int in_range(reader_request_t *reader_request, tag_t *tag){
     //reader_request->elapsed_time
     //tag->posx
     //tag->posy
-    int cur_posx = reader_request->posx + (reader_request->start_time - reader_request->init_time) * reader_request->velocity + (reader_request->plen<<3)*1000/DOWNLINK_BITRATE;
+    double cur_posx = reader_request->posx + (reader_request->start_time - reader_request->init_time) * reader_request->velocity + (reader_request->plen<<3)*1000/DOWNLINK_BITRATE;
 //    LOG(INFO, "start_time:%d, init_time:%d, velocity:%f, reader[%d](%d, %d)-->tag[%d](%d, %d)",reader_request->start_time, reader_request->init_time,reader_request->velocity, 
 //    reader_request->addr, cur_posx, reader_request->posy, tag->conn, tag->posx, tag->posy);
     //LOG(INFO, "reader(%d, %d)-->tag(%d, %d)", reader_request->posx, reader_request->posy, tag->posx, tag->posy);
@@ -515,8 +511,8 @@ void *tag_thread(void *arg){
 	tag_t *tag = create_tag();
     int conn = unix_domain_client_init(tag_proxy_path);
     //int posx = *((int *)arg);
-    int posx = ((int *)arg)[0];
-    int posy = 0;
+    double posx = ((double *)arg)[0];
+    double posy = 0;
     tag_init(tag, conn, posx, posy);
     reader_request_t *reader_request_tbl[READER_MAX_NUM] = {NULL};
     int in_range_req_num;
@@ -538,7 +534,7 @@ void *tag_thread(void *arg){
 
             vector<Point> lights;
             for(int k = 0; k < req_bat->num; k++){
-                int x,y;
+                double x,y;
                 get_send_pos(&req_bat->req[k], &x, &y);
                 lights.push_back(Point(x, y));
             }
@@ -548,7 +544,7 @@ void *tag_thread(void *arg){
                 check_alias(tag, req_bat->req[i].start_time);
                 check_silent(tag, req_bat->req[i].start_time);
 
-                int x,y;
+                double x,y;
                 get_send_pos(&req_bat->req[i], &x, &y);
                 lights.push_back(Point(x, y));
 #if 1
@@ -565,12 +561,12 @@ void *tag_thread(void *arg){
                         sprintf(p_str, "%s %02x", p_str, req_bat->req[i].payload[k]);
                     }
                     if(!is_intersect(lights, Point(tag->posx, tag->posy), lights.size())){
-                        LOG(INFO, "req_start_time:%d, [in-veiw ]init_time:%d, reader[%d](%f, %d)-->tag[%d](%d, %d), receive data:%s",req_bat->req[i].start_time, req_bat->req[i].init_time,
+                        LOG(INFO, "req_start_time:%d, [in-veiw ]init_time:%d, reader[%d](%f, %f)-->tag[%d](%f, %f), receive data:%s",req_bat->req[i].start_time, req_bat->req[i].init_time,
                         req_bat->req[i].addr, cur_posx, req_bat->req[i].posy, tag->conn, tag->posx, tag->posy, p_str);
                         in_range_req_num++;
                         in_range_req = &req_bat->req[i];
                     }else{
-                        LOG(INFO, "req_start_time:%d, [in-veiw but intersect]init_time:%d, reader[%d](%f, %d)-->tag[%d](%d, %d), receive data:%s",req_bat->req[i].start_time, req_bat->req[i].init_time,
+                        LOG(INFO, "req_start_time:%d, [in-veiw but intersect]init_time:%d, reader[%d](%f, %f)-->tag[%d](%f, %f), receive data:%s",req_bat->req[i].start_time, req_bat->req[i].init_time,
                         req_bat->req[i].addr, cur_posx, req_bat->req[i].posy, tag->conn, tag->posx, tag->posy, p_str);
                     }
                 }
@@ -681,7 +677,7 @@ void tag_info_handler(tag_info_t *tag_info, int remote_conn){
 */
 
 void *tag_proxy(void *arg){
-    int tag_pos[TAG_MAX_NUM];
+    double tag_pos[TAG_MAX_NUM];
     memset(tag_pos, 0, sizeof(tag_pos));
 
     int tag_conn[TAG_MAX_NUM];
@@ -806,10 +802,11 @@ void usage(char *prog){
 //g_spaceing<double>
 
 int main(int argc, char *argv[]){
-    if(argc == 3){
+    if(argc == 2){
 //        reader_num = atoi(argv[1]);
-        tag_num = atoi(argv[1]);
-        g_spacing = atof(argv[2]);
+//        tag_num = atoi(argv[1]);
+        g_spacing = atof(argv[1]);
+        tag_num = TAG_ROAD_LENGTH/g_spacing;
 //        g_velocity = atof(argv[4])/3600;
         g_com_dist = 100.0;
         g_sys_fov = 20.0/2*PI/180;

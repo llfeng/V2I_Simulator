@@ -59,8 +59,8 @@
 
 
 typedef struct{
-    int posx;
-    int posy;
+    double posx;
+    double posy;
     int type;
     int plen;
     int start_time;
@@ -70,8 +70,8 @@ typedef struct{
 typedef struct{
     int conn;
     int addr;
-    int posx;
-    int posy;
+    double posx;
+    double posy;
     int plen;
     int start_time;
     int init_time;
@@ -118,9 +118,9 @@ extern int unix_domain_server_init(const char *path);
 
 extern int unix_domain_client_init(const char *path);
 
-extern void get_send_pos(reader_request_t *reader_request, int *x, int *y);
+extern void get_send_pos(reader_request_t *reader_request, double *x, double *y);
 
-extern void get_recv_pos(reader_request_t *reader_request, tag_response_t *tag_response, int *x, int *y);
+extern void get_recv_pos(reader_request_t *reader_request, tag_response_t *tag_response, double *x, double *y);
 
 
 #endif

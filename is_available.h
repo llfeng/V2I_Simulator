@@ -1,7 +1,24 @@
 #pragma once
 
+#ifndef IS_AVAILABLE_H
+#define IS_AVAILABLE_H
 #include <vector>
 using std::vector;
+
+
+#define VEHICLE_LENGTH  4.5
+#define VEHICLE_WIDTH   2.5
+
+#define TAG_POSY_OFFSET 1.0
+#define LANE_WIDTH      3.5
+
+#define MAX_LANE_NUM    3
+#define TAG_ROAD_LENGTH 200
+
+#define VELOCITY_NUM    5
+
+#define VEHICLE_NUM_PER_LANE    10
+
 
 #define X get_x()
 #define Y get_y()
@@ -19,3 +36,4 @@ bool is_intersect(const vector<Point> &lights,
 	int which);
 
 static bool interval_is_intersect(double a, double b, double c, double d);
+#endif
