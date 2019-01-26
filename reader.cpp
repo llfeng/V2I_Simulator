@@ -40,7 +40,10 @@
 #include "log.h"
 #include "is_available.h"
 
-
+#ifdef LOG_LEVEL   
+#undef LOG_LEVEL
+#define LOG_LEVEL FATAL
+#endif
 
 
 using namespace std;
@@ -207,7 +210,9 @@ int reader_num;
 int tag_num;
 int g_velocity_type;
 int g_lane_num;
+int g_tag_spacing;
 double g_velocity;         //unit--m/ms
+
 
 
 double g_com_dist_up;
@@ -431,17 +436,31 @@ bool tag_response_end_cmp_ascent(tag_response_t a, tag_response_t b){
     return a.start_time + (a.plen << 3) * 1000/UPLINK_BITRATE < b.start_time + (b.plen << 3) * 1000/UPLINK_BITRATE; 
 }
 
-
+int sof_in_range(reader_t *reader, tag_response_t *tag_response){
+//start of frame
+    double start_posx = reader->posx + (tag_response->start_time - reader->init_time) * reader->velocity;
+    double start_delta_x = start_posx - tag_response->posx;
+    double start_delta_y = reader->posy - tag_response->posy;
+    double start_distance = sqrt(pow(start_delta_x, 2) + pow(start_delta_y, 2));
+    double start_degree = atan(fabs(start_delta_y)/fabs(start_delta_x));
+    if(start_distance < g_com_dist_up && start_degree < g_sys_fov && start_delta_x < 0){
+        return 1;
+    }else{
+        return 0;
+    }
+}
 
 void piggyback_data_handler(reader_t *reader, tag_response_t *tag_response_tbl, int rsp_num){       //not for me
     if(rsp_num == 1){
-        if(lookup_pair(reader, tag_response_tbl[0].payload[0], tag_response_tbl[0].payload[1] >> 4, tag_response_tbl[0].payload[2]) == 0){
-            add_pair(reader, tag_response_tbl[0].payload[0], tag_response_tbl[0].payload[1] >> 4, tag_response_tbl[0].payload[2], tag_response_tbl[0].start_time);
-            pthread_mutex_lock(&g_write_log_mutex);
-            if(updata_receive_id_table(reader, &tag_response_tbl[0]) == 0){
-                record_log(reader, &tag_response_tbl[0]);
+        if(sof_in_range(reader, &tag_response_tbl[0])){
+            if(lookup_pair(reader, tag_response_tbl[0].payload[0], tag_response_tbl[0].payload[1] >> 4, tag_response_tbl[0].payload[2]) == 0){
+                add_pair(reader, tag_response_tbl[0].payload[0], tag_response_tbl[0].payload[1] >> 4, tag_response_tbl[0].payload[2], tag_response_tbl[0].start_time);
+                pthread_mutex_lock(&g_write_log_mutex);
+                if(updata_receive_id_table(reader, &tag_response_tbl[0]) == 0){
+                    record_log(reader, &tag_response_tbl[0]);
+                }
+                pthread_mutex_unlock(&g_write_log_mutex);
             }
-            pthread_mutex_unlock(&g_write_log_mutex);
         }
     }else if(rsp_num == 2){
         sort(tag_response_tbl, tag_response_tbl + rsp_num, tag_response_cmp_ascent);
@@ -589,18 +608,13 @@ int be_blocked(reader_request_t *reader_request, tag_response_t *tag_response){
 
 
 
+
 int in_range(reader_request_t *reader_request, tag_response_t *tag_response){
 //    return 1;
     //distance
     //fov
     //blockage
     
-//start of frame
-    double start_posx = reader_request->posx + (tag_response->start_time - reader_request->init_time) * reader_request->velocity;
-    double start_delta_x = start_posx - tag_response->posx;
-    double start_delta_y = reader_request->posy - tag_response->posy;
-    double start_distance = sqrt(pow(start_delta_x, 2) + pow(start_delta_y, 2));
-    double start_degree = atan(fabs(start_delta_y)/fabs(start_delta_x));
 
 //end of frame
     double cur_posx = reader_request->posx + (tag_response->start_time + (tag_response->plen << 3)*1000/UPLINK_BITRATE - reader_request->init_time) * reader_request->velocity;
@@ -658,11 +672,15 @@ void handler_tag_response(tag_response_t *tag_response_tbl, reader_t *reader, in
             }
     }else{
         reader->carrier_block_time = tag_response_tbl[0].start_time + (tag_response_tbl[rsp_num - 1].plen << 3) * 1000/UPLINK_BITRATE;
-//        LOG(INFO, "carrier_block_time:%d, tag_response_tbl[0].start_time:%d, tag_response_tbl[rsp_num - 1].plen:%d", reader->carrier_block_time, tag_response_tbl[0].start_time, tag_response_tbl[rsp_num - 1].plen);
-        if(get_dst_addr(&tag_response_tbl[0]) == reader->addr){
-            uplink_data_handler(reader, &tag_response_tbl[0]);
+        if(sof_in_range(reader, &tag_response_tbl[0])){
+            //        LOG(INFO, "carrier_block_time:%d, tag_response_tbl[0].start_time:%d, tag_response_tbl[rsp_num - 1].plen:%d", reader->carrier_block_time, tag_response_tbl[0].start_time, tag_response_tbl[rsp_num - 1].plen);
+            if(get_dst_addr(&tag_response_tbl[0]) == reader->addr){
+                uplink_data_handler(reader, &tag_response_tbl[0]);
+            }else{
+                piggyback_data_handler(reader, &tag_response_tbl[0], 1);
+            }
         }else{
-            piggyback_data_handler(reader, &tag_response_tbl[0], 1);
+            uplink_collision_handler(reader);
         }
     }
 }
@@ -892,7 +910,7 @@ void do_handler(req_bat_t *sent_req_bat,
 
             if(in_range(&sent_req_bat->req[i], &rsp_bat->rsp[j])){                
 //            if(in_range(&sent_req_bat->req[i], &rsp_bat->rsp[j]) && !is_intersect(lights, Point(rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy), lights.size())){                
-                if(!is_intersect(lights, Point(rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy), lights.size())){
+                if(!is_intersect(lights, Point(rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy), lights.size() - 1)){
                     LOG(INFO, "sent-reader[%3d]  is [in-view ]. reader(%3f, %3f)<----tag(%3f, %3f), rsp_start_time:%10d, receive data:%s", sent_req_bat->req[i].addr, x, y, rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy, rsp_bat->rsp[j].start_time, p_str);                
                     memcpy((char *)&(to_reader_rsp_bat->rsp[to_reader_rsp_bat->num++]), (char *)&(rsp_bat->rsp[j]), sizeof(tag_response_t)); 
                 }else{
@@ -941,7 +959,7 @@ void do_handler(req_bat_t *sent_req_bat,
                 sprintf(p_str, "%s %02x", p_str, rsp_bat->rsp[j].payload[k]);
             }
             if(in_range(&ready_req_bat->req[i], &rsp_bat->rsp[j])){                
-                if(!is_intersect(lights, Point(rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy), lights.size())){
+                if(!is_intersect(lights, Point(rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy), lights.size() - 1)){
                     LOG(INFO, "ready-reader[%3d] is [in-view ]. reader(%3f, %3f)<----tag(%3f, %3f), rsp_start_time:%10d, receive data:%s", ready_req_bat->req[i].addr, x, y, rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy, rsp_bat->rsp[j].start_time, p_str);
                     memcpy((char *)&(to_reader_rsp_bat->rsp[to_reader_rsp_bat->num++]), (char *)&(rsp_bat->rsp[j]), sizeof(tag_response_t)); 
                 }else{
@@ -1144,10 +1162,13 @@ void usage(char *prog){
 
 int main(int argc, char *argv[]){
     double *pos_buf = NULL;
-    if(argc == 3){ 
+    if(argc == 4){ 
         g_lane_num = atoi(argv[1]);
     
         g_velocity_type = atoi(argv[2]);
+
+        g_tag_spacing = atoi(argv[3]);
+
         //g_velocity = atof(argv[2])/3600;    
         g_velocity = velocity_dist_tbl[g_velocity_type][0]/3600;    
         g_car_dist = velocity_dist_tbl[g_velocity_type][1];
@@ -1190,10 +1211,10 @@ int main(int argc, char *argv[]){
 
     time_t t = time(0);    
     struct tm ttt = *localtime(&t);
-    sprintf(log_path, "trace-%4d-%02d-%02d_%02d_%02d_%02d_%dlane_%dvelocity.log", ttt.tm_year + 1900, ttt.tm_mon + 1, ttt.tm_mday, ttt.tm_hour, ttt.tm_min, ttt.tm_sec, g_lane_num, (int)g_velocity);
+    sprintf(log_path, "trace-%4d-%02d-%02d_%02d_%02d_%02d_lane%d_velocity%d_spacing%d.log", ttt.tm_year + 1900, ttt.tm_mon + 1, ttt.tm_mday, ttt.tm_hour, ttt.tm_min, ttt.tm_sec, g_lane_num, g_velocity_type, g_tag_spacing);
     g_log_file_fd = open(log_path, O_RDWR|O_CREAT, 0664);
 
-    sprintf(res_path, "result-%4d-%02d-%02d_%02d_%02d_%02d_%dlane_%dvelocity.csv", ttt.tm_year + 1900, ttt.tm_mon + 1, ttt.tm_mday, ttt.tm_hour, ttt.tm_min, ttt.tm_sec, g_lane_num, (int)g_velocity);
+    sprintf(res_path, "result-%4d-%02d-%02d_%02d_%02d_%02d_lane%d_velocity%d_spacing%d.csv", ttt.tm_year + 1900, ttt.tm_mon + 1, ttt.tm_mday, ttt.tm_hour, ttt.tm_min, ttt.tm_sec, g_lane_num, g_velocity_type, g_tag_spacing);
     g_res_file_fd = open(res_path, O_RDWR|O_CREAT, 0664);
 
     trace_fd = unix_domain_client_init(trace_sock_path);

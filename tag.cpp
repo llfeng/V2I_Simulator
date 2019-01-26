@@ -41,8 +41,8 @@
 
 #ifdef LOG_LEVEL
 #undef LOG_LEVEL
+#define LOG_LEVEL   FATAL
 #endif
-#define LOG_LEVEL   DEBUG
 
 #define USE_ROUND_ADDR 1
 
@@ -478,7 +478,8 @@ int in_range(reader_request_t *reader_request, tag_t *tag){
     //reader_request->elapsed_time
     //tag->posx
     //tag->posy
-    double cur_posx = reader_request->posx + (reader_request->start_time - reader_request->init_time) * reader_request->velocity + (reader_request->plen<<3)*1000/DOWNLINK_BITRATE;
+    //double cur_posx = reader_request->posx + (reader_request->start_time - reader_request->init_time) * reader_request->velocity + (reader_request->plen<<3)*1000/DOWNLINK_BITRATE;
+    double cur_posx = reader_request->posx + (reader_request->start_time - reader_request->init_time + (double)(reader_request->plen<<3)*1000/DOWNLINK_BITRATE) * reader_request->velocity;
 //    LOG(INFO, "start_time:%d, init_time:%d, velocity:%f, reader[%d](%d, %d)-->tag[%d](%d, %d)",reader_request->start_time, reader_request->init_time,reader_request->velocity, 
 //    reader_request->addr, cur_posx, reader_request->posy, tag->conn, tag->posx, tag->posy);
     //LOG(INFO, "reader(%d, %d)-->tag(%d, %d)", reader_request->posx, reader_request->posy, tag->posx, tag->posy);
@@ -554,13 +555,14 @@ void *tag_thread(void *arg){
                 }
 //                if(in_range(&req_bat->req[i], tag) && !is_intersect(lights, Point(tag->posx, tag->posy), lights.size())){
                 if(in_range(&req_bat->req[i], tag)){
-                    double cur_posx = req_bat->req[i].posx + (req_bat->req[i].start_time - req_bat->req[i].init_time) * req_bat->req[i].velocity + (req_bat->req[i].plen<<3)*1000/DOWNLINK_BITRATE;
+                    double cur_posx = req_bat->req[i].posx + (req_bat->req[i].start_time - req_bat->req[i].init_time + (double)(req_bat->req[i].plen<<3)*1000/DOWNLINK_BITRATE) * req_bat->req[i].velocity;
+//                    double cur_posx = req_bat->req[i].posx + (req_bat->req[i].start_time - req_bat->req[i].init_time) * req_bat->req[i].velocity + (req_bat->req[i].plen<<3)*1000/DOWNLINK_BITRATE;
                     char p_str[512] = {0};
                     memset(p_str, 0, sizeof(p_str));
                     for(int k = 0; k < req_bat->req[i].plen; k++){
                         sprintf(p_str, "%s %02x", p_str, req_bat->req[i].payload[k]);
                     }
-                    if(!is_intersect(lights, Point(tag->posx, tag->posy), lights.size())){
+                    if(!is_intersect(lights, Point(tag->posx, tag->posy), lights.size() - 1)){
                         LOG(INFO, "req_start_time:%d, [in-veiw ]init_time:%d, reader[%d](%f, %f)-->tag[%d](%f, %f), receive data:%s",req_bat->req[i].start_time, req_bat->req[i].init_time,
                         req_bat->req[i].addr, cur_posx, req_bat->req[i].posy, tag->conn, tag->posx, tag->posy, p_str);
                         in_range_req_num++;
