@@ -16,6 +16,7 @@
  * =====================================================================================
  */
 
+#include <algorithm>
 #include <vector>
 #include <stdlib.h>  
 #include <stdio.h>  
@@ -35,6 +36,8 @@
 #include "common.h"
 #include "log.h"
 #include "is_available.h"
+
+using namespace std;
 
 
 #define PI 3.141592654
@@ -618,73 +621,7 @@ void send_to_tag(tag_info_t *tag_info, char *buf, int buflen){
 #define UPLINK_DATA         3
 
 
-/* 
-void send_collision_to_reader(int remote_conn){
-    tag_response_t msg;
-    memset(&msg, 0, sizeof(tag_response_t));
-    msg.type = UPLINK_COLLISION;
-    write(remote_conn, (char *)&msg, sizeof(tag_response_t));
-}
 
-void send_idle_to_reader(int remote_conn){
-    tag_response_t msg;
-    memset(&msg, 0, sizeof(tag_response_t));
-    msg.type = UPLINK_IDLE;
-    write(remote_conn, (char *)&msg, sizeof(tag_response_t));
-}
-
-void send_data_to_reader(tag_info_t tag_info, int remote_conn){
-    tag_response_t msg;
-    memset(&msg, 0, sizeof(tag_response_t));
-    msg.type = UPLINK_DATA;
-    msg.plen = tag_info.plen;
-    memcpy(msg.payload, tag_info.payload, tag_info.plen);
-    write(remote_conn, (char *)&msg, sizeof(tag_response_t));
-}
-*/
-
-/*
-void tag_info_handler(tag_info_t *tag_info, int remote_conn){
-    char addr_slot[32];
-    memset(addr_slot, 0, sizeof(addr_slot));
-    int vaild_num = 0;
-    int vaild_index = -1;
-    char short_addr = 0;
-    int collision_flag = 0;
-    for(int i = 0; i < tag_num; i++){
-        if(tag_info[i].vaild){
-            printf("[--will send: %02x %02x--]\n", tag_info[i].payload[0], tag_info[i].payload[1]);
-            vaild_index = i;
-            vaild_num++;
-            short_addr = (tag_info[i].payload[1] >> 4);
-            addr_slot[short_addr]++;
-        }
-        if(addr_slot[short_addr] > 1){
-            collision_flag = 1;
-            break;
-        }
-    }
-
-    printf("vaild_num:%d\n", vaild_num);
-
-    if(vaild_num > 1){
-        if(collision_flag){
-            send_collision_to_reader(remote_conn);
-        }else{
-            printf("tag vaild num > 1!!!\n");
-        }
-    }else if(vaild_num == 0){
-        send_idle_to_reader(remote_conn);
-    }else{      //vaild_num = 1
-        send_data_to_reader(tag_info[vaild_index], remote_conn);
-    }
-    for(int i = 0; i < tag_num; i++){
-        tag_info[i].vaild = 0;
-        tag_info[i].plen = 0;
-        memset(tag_info[i].payload, 0, sizeof(tag_info[i].payload));
-    }
-}
-*/
 
 void *tag_proxy(void *arg){
     double tag_pos[TAG_MAX_NUM];
@@ -695,8 +632,24 @@ void *tag_proxy(void *arg){
     int local_serverfd = unix_domain_server_init(tag_proxy_path);
 
     pthread_t *thread_tab = (pthread_t *)malloc(sizeof(pthread_t)*tag_num);
+
+    int tag_index = 0;
+    for(int i = 0; i < TAG_AXIS_NUM; i++){
+        tag_pos[tag_index++] = TAG_SPACING_OFFSET + i * g_spacing;        
+        int internal_tag_num = random()%EACH_SPACING_MAX_TAG_NUM;
+        double insert_tag[10];
+        int insert_count = 0;
+        for(int j = 0; j < internal_tag_num; j++){
+            insert_tag[insert_count++] = TAG_SPACING_OFFSET + i * g_spacing + random()%(int)g_spacing;  
+        }
+        sort(insert_tag, insert_tag+insert_count);
+        memcpy(&tag_pos[tag_index], insert_tag, insert_count * sizeof(double));
+        tag_index += insert_count;
+    }
+    tag_num = tag_index;
     for(int i = 0; i < tag_num; i++){
-        tag_pos[i] = i * g_spacing + TAG_SPACING_OFFSET;
+        printf("tag[%d]:(%f,%f)\n", i, tag_pos[i], 0.0) ;
+//        tag_pos[i] = i * g_spacing + TAG_SPACING_OFFSET;
         pthread_create(&thread_tab[i], NULL, tag_thread, (void *)&tag_pos[i]);
     }   
 
@@ -708,6 +661,13 @@ void *tag_proxy(void *arg){
     }
 
     int remote_conn = accept(remote_serverfd, NULL, NULL);
+
+
+//    char tag_num_str[32];
+//    sprintf(tag_num_str, "%d", tag_num);
+//    write(remote_serverfd, tag_num_str, )
+    write(remote_conn, tag_pos, sizeof(tag_pos));
+
 
     printf("tag_proxy init ok\n");
 
@@ -816,7 +776,7 @@ int main(int argc, char *argv[]){
 //        reader_num = atoi(argv[1]);
 //        tag_num = atoi(argv[1]);
         g_spacing = atof(argv[1]);
-        tag_num = TAG_ROAD_LENGTH/g_spacing;
+//        tag_num = TAG_ROAD_LENGTH/g_spacing;
 //        g_velocity = atof(argv[4])/3600;
         g_com_dist_down = DOWNLINK_DISTANCE;
         g_sys_fov = 20.0/2*PI/180;

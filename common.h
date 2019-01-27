@@ -20,6 +20,9 @@
 #define __COMMON_H__
 
 
+#define TAG_AXIS_NUM 50
+#define EACH_SPACING_MAX_TAG_NUM 3
+
 #define READER_ADDR_BITLEN  1
 #define READER_ADDR_BITLEN_DEFAULT 1
 
@@ -35,7 +38,7 @@
 
 
 //#define DOWNLINK_WINDOW 8
-#define DOWNLINK_WINDOW 10
+#define DOWNLINK_WINDOW 20
 #define DOWNLINK_BITRATE 10000
 
 #define DOWN_SLOT_TIME   ((DEFAULT_DOWNLINK_LEN << 3)*1000/DOWNLINK_BITRATE)
@@ -46,7 +49,7 @@
 #define PAYLOAD_MAX_LEN 240
 
 #define READER_MAX_NUM  100
-#define TAG_MAX_NUM  50
+#define TAG_MAX_NUM  (TAG_AXIS_NUM*EACH_SPACING_MAX_TAG_NUM)
 
 
 #define REQ_MAX_NUM READER_MAX_NUM
@@ -70,6 +73,7 @@ typedef struct{
     int type;
     int plen;
     int start_time;
+    int sign_type;
     char payload[PAYLOAD_MAX_LEN];
 }tag_response_t;
 

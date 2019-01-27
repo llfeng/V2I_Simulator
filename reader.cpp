@@ -203,6 +203,8 @@ char trace_type[TRACE_TYPE_NUM][NAME_MAX_LEN] = {
 };
 
 
+double g_tag_pos[TAG_MAX_NUM];
+
 pthread_mutex_t reader_mutex;
 
 pthread_mutex_t reader_finish_mutex;
@@ -403,7 +405,14 @@ void record_log(reader_t *reader, tag_response_t *tag_response){
     //RECORD_TRACE(g_res_file_fd, res_s, "reader_uuid:%d, reader(%f,%f), tag(%f,%f)\n", reader->uuid, x, reader->posy, tag_response->posx, tag_response->posy);
     RECORD_TRACE(g_res_file_fd, res_s, "%d,%f,%f,%f,%f\n", reader->uuid, x, reader->posy, tag_response->posx, tag_response->posy);
     
-    reader->recorded[(int)((tag_response->posx-TAG_SPACING_OFFSET)/g_tag_spacing)] = 1;
+    for(int i = 0; i < TAG_MAX_NUM; i++){
+        if(abs(tag_response->posx - g_tag_pos[i]) < 1e-8){
+            reader->recorded[i] = 1;
+        }else if(abs(g_tag_pos[i]) < 1e-8){
+            break;
+        }
+    }
+//    reader->recorded[(int)((tag_response->posx-TAG_SPACING_OFFSET)/g_tag_spacing)] = 1;
 
     if(g_receive_item_count > LOG_FETCH_ITEM){
         reader->die_flag = 1;
@@ -746,13 +755,13 @@ void reader_backup(reader_t *reader){
 }
 
 
-#define RIGHT_TAG 200
+//#define RIGHT_TAG TAG_MAX_NUM
 
 //init_posx
 //init_posy
 void send_reader_request_to_reader_proxy(reader_t *reader){
     double cur_posx = reader->posx + (reader->start_time - reader->init_time) * reader->velocity;
-    if( cur_posx > RIGHT_TAG){    
+    if( cur_posx > (TAG_AXIS_NUM*g_tag_spacing)){    
         char res_s[256];
         memset(res_s, 0, sizeof(res_s));
 //        RECORD_TRACE(g_res_file_fd, res_s, "%d,-1,-1,-1,-1\n", reader->uuid);
@@ -863,8 +872,31 @@ void *reader_thread(void *arg){
         double cur_posx = reader->posx + (reader->start_time - reader->init_time) * reader->velocity;
         char res_s[256];
         memset(res_s, 0, sizeof(res_s));
+
+
+        for(int i = 0; i < TAG_MAX_NUM; i++){
+            if((abs(g_tag_pos[i]) > 1e-8) && cur_posx > g_tag_pos[i]){
+                if(reader->recorded[i] == 0){
+                    RECORD_TRACE(g_res_file_fd, res_s, "%d,%f,%f,%f,%f\n", reader->uuid, cur_posx, reader->posy, (double)(TAG_SPACING_OFFSET + (tag_num-1)*g_tag_spacing), 0.0);   
+                    reader->recorded[i] = 1;
+                    g_receive_item_count++;
+                }
+            }else if(abs(g_tag_pos[i]) < 1e-8){
+                break;
+            }
+        }
+
+/* 
         for(int i = 0; i < tag_num; i++){
-            if((cur_posx - TAG_SPACING_OFFSET)/(double)g_tag_spacing > tag_num){
+            for(int i = 0; i < TAG_MAX_NUM; i++){
+                if(abs(tag_response->posx - g_tag_pos[i]) < 1e-8){
+                    reader->recorded[i] = 1;
+                }else if(abs(g_tag_pos[i]) < 1e-8){
+                    break;
+                }
+            }
+            //if((cur_posx - TAG_SPACING_OFFSET)/(double)g_tag_spacing > tag_num){
+            if(){
                 if(reader->recorded[tag_num-1] == 0){
                     RECORD_TRACE(g_res_file_fd, res_s, "%d,%f,%f,%f,%f\n", reader->uuid, cur_posx, reader->posy, (double)(TAG_SPACING_OFFSET + (tag_num-1)*g_tag_spacing), 0.0);   
                     g_receive_item_count++;
@@ -878,6 +910,7 @@ void *reader_thread(void *arg){
                 }
             }
         }
+*/
 
         if(tag_rsp_bat->type == INIT_TRIGGER){
             send_reader_request_to_reader_proxy(reader);
@@ -1078,6 +1111,12 @@ void *reader_proxy(void *arg){
     }
 
     int remote_clientfd = unix_domain_client_init(simulator_server_path);
+
+    memset(g_tag_pos, 0, sizeof(g_tag_pos));
+    read(remote_clientfd, g_tag_pos, sizeof(g_tag_pos));
+    for(int i = 0; i < READER_MAX_NUM; i++){
+        printf("tag[%d]:(%f, %f)\n", i, g_tag_pos[i], 0.0);
+    }
 
     for(int i = 0; i < reader_num; i++){
         reader_conn[i] = accept(local_serverfd, NULL, NULL);

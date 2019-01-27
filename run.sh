@@ -13,15 +13,15 @@ do
 	    do
             if [ $k -eq 1 ]
             then
-                interval=10
+                interval=100
             fi
             if [ $k -eq 2 ]
             then
-                interval=50
+                interval=500
             fi
             if [ $k -eq 3 ]
             then
-                interval=100
+                interval=1000
             fi
 #		    interval=`expr $k \* 10`
 #            echo lane${lane_num}_velocity${velocity}_spacing${interval}
