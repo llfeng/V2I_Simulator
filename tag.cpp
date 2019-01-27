@@ -41,7 +41,8 @@
 
 #ifdef LOG_LEVEL
 #undef LOG_LEVEL
-#define LOG_LEVEL   FATAL
+//#define LOG_LEVEL   FATAL
+#define LOG_LEVEL   100
 #endif
 
 #define USE_ROUND_ADDR 1
@@ -125,6 +126,7 @@ typedef struct{
     double posx;
     double posy;
     int start_time;
+    int busy_time;
 }tag_t;
 
 
@@ -149,7 +151,7 @@ int reader_num;
 int tag_num;
 double g_spacing;
 double g_velocity;
-double g_com_dist;
+double g_com_dist_down;
 double g_sys_fov;
 
 int trace_fd = -1;
@@ -270,12 +272,15 @@ void send_to_proxy(tag_t *tag){
     time(NULL), tag->txbuf[0], tag->txbuf[1], tag->txbuf[2], tag->txbuf[3], tag->txbuf[4]);
     tag_response_t *rsp = (tag_response_t *)malloc(sizeof(tag_response_t));
     rsp->plen = tag->txbuflen;
-    memcpy(rsp->payload, tag->txbuf, rsp->plen);
+    memcpy(rsp->payload, tag->txbuf, tag->txbuflen);
+    rsp->plen += (READER_ADDR_BITLEN - READER_ADDR_BITLEN_DEFAULT);
     rsp->start_time = tag->start_time;
     rsp->posx = tag->posx;
     rsp->posy = tag->posy;
     rsp->type = DATA;
     
+    tag->busy_time = rsp->start_time + (rsp->plen << 3) * 1000/UPLINK_BITRATE;
+
     int sent_bytes = write(tag->conn, (char *)rsp, sizeof(tag_response_t));
     free(rsp);
 }
@@ -410,7 +415,8 @@ void parse_downlink(tag_t *tag, reader_request_t *req){     //mac
             send_nop_to_proxy(tag);
             //do nothing
 //            delete_alias(tag, reader_addr);
-        }else{
+        //}else{
+        }else if(tag->busy_time < tag->start_time){
             char addr_range = 0;
             char collision_num = buf[3] >> 4;
             if(collision_num == 0){
@@ -430,10 +436,12 @@ void parse_downlink(tag_t *tag, reader_request_t *req){     //mac
             }else{
                 send_nop_to_proxy(tag);
             }
+        }else{
+            send_nop_to_proxy(tag);
         }
     }else{  //QUERY_REQUEST
         printf("[%ld--recv:%02x %02x]\n", time(NULL), buf[0], buf[1]);
-        if(lookup_alias(tag, reader_addr, tag_addr, round, 0) == 1){
+        if((tag->busy_time < tag->start_time) && (lookup_alias(tag, reader_addr, tag_addr, round, 0) == 1)){
             tag->addr = tag_addr;
             tag->dst = reader_addr;
             tag->round = round;
@@ -489,13 +497,13 @@ int in_range(reader_request_t *reader_request, tag_t *tag){
     double delta_y = reader_request->posy - tag->posy;
     double distance = sqrt(pow(delta_x, 2) + pow(delta_y, 2));
     double degree = atan(fabs(delta_y)/fabs(delta_x));
-    if(distance < g_com_dist && degree < g_sys_fov && delta_x < 0){
+    if(distance < g_com_dist_down && degree < g_sys_fov && delta_x < 0){
         if(be_blocked(reader_request, tag)){
             return 0;
         }else{
             char p_str[512] = {0};
             memset(p_str, 0, sizeof(p_str));
-            for(int k = 0; k < reader_request->plen; k++){
+            for(int k = 0; k < reader_request->plen - (READER_ADDR_BITLEN - READER_ADDR_BITLEN_DEFAULT); k++){
                 sprintf(p_str, "%s %02x", p_str, reader_request->payload[k]);
             }
 //            LOG(INFO, "req_start_time:%d, init_time:%d, velocity:%f, reader[%d](%d, %d)-->tag[%d](%d, %d), receive data:%s",reader_request->start_time, reader_request->init_time,reader_request->velocity, 
@@ -533,33 +541,39 @@ void *tag_thread(void *arg){
 
             pthread_mutex_lock(&tag_mutex);
 
+/*
             vector<Point> lights;
             for(int k = 0; k < req_bat->num; k++){
                 double x,y;
                 get_send_pos(&req_bat->req[k], &x, &y);
                 lights.push_back(Point(x, y));
             }
-
+*/
             reader_request_t *in_range_req = NULL;
             for(int i = 0; i < req_bat->num; i++){
+            
                 check_alias(tag, req_bat->req[i].start_time);
                 check_silent(tag, req_bat->req[i].start_time);
+
+                vector<Point> lights;
+                for(int k = 0; k < req_bat->num; k++){
+                    double x,y;
+                    calibrate_reader_pos(&req_bat->req[k], req_bat->req[i].start_time, &x, &y);
+                    lights.push_back(Point(x, y));
+                }
 
                 double x,y;
                 get_send_pos(&req_bat->req[i], &x, &y);
                 lights.push_back(Point(x, y));
-#if 1
                 if(tag->posx < 100){
                     printf("ERROR HERE!\n");
                     while(1);
                 }
-//                if(in_range(&req_bat->req[i], tag) && !is_intersect(lights, Point(tag->posx, tag->posy), lights.size())){
-                if(in_range(&req_bat->req[i], tag)){
+                if((req_bat->req[i].type == REAL_SENT) && in_range(&req_bat->req[i], tag)){
                     double cur_posx = req_bat->req[i].posx + (req_bat->req[i].start_time - req_bat->req[i].init_time + (double)(req_bat->req[i].plen<<3)*1000/DOWNLINK_BITRATE) * req_bat->req[i].velocity;
-//                    double cur_posx = req_bat->req[i].posx + (req_bat->req[i].start_time - req_bat->req[i].init_time) * req_bat->req[i].velocity + (req_bat->req[i].plen<<3)*1000/DOWNLINK_BITRATE;
                     char p_str[512] = {0};
                     memset(p_str, 0, sizeof(p_str));
-                    for(int k = 0; k < req_bat->req[i].plen; k++){
+                    for(int k = 0; k < req_bat->req[i].plen - (READER_ADDR_BITLEN - READER_ADDR_BITLEN_DEFAULT); k++){
                         sprintf(p_str, "%s %02x", p_str, req_bat->req[i].payload[k]);
                     }
                     if(!is_intersect(lights, Point(tag->posx, tag->posy), lights.size() - 1)){
@@ -572,12 +586,6 @@ void *tag_thread(void *arg){
                         req_bat->req[i].addr, cur_posx, req_bat->req[i].posy, tag->conn, tag->posx, tag->posy, p_str);
                     }
                 }
-#else                
-                if(in_range(&req_bat->req[i], tag)){
-                    in_range_req_num++;
-                    in_range_req = &req_bat->req[i];
-                }
-#endif                
                 lights.pop_back();
             }
             if(in_range_req_num > 1){
@@ -688,7 +696,7 @@ void *tag_proxy(void *arg){
 
     pthread_t *thread_tab = (pthread_t *)malloc(sizeof(pthread_t)*tag_num);
     for(int i = 0; i < tag_num; i++){
-        tag_pos[i] = i * g_spacing + 110;
+        tag_pos[i] = i * g_spacing + TAG_SPACING_OFFSET;
         pthread_create(&thread_tab[i], NULL, tag_thread, (void *)&tag_pos[i]);
     }   
 
@@ -810,7 +818,7 @@ int main(int argc, char *argv[]){
         g_spacing = atof(argv[1]);
         tag_num = TAG_ROAD_LENGTH/g_spacing;
 //        g_velocity = atof(argv[4])/3600;
-        g_com_dist = 100.0;
+        g_com_dist_down = DOWNLINK_DISTANCE;
         g_sys_fov = 20.0/2*PI/180;
     }else{
         usage(argv[0]);

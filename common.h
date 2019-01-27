@@ -20,6 +20,8 @@
 #define __COMMON_H__
 
 
+#define READER_ADDR_BITLEN  1
+#define READER_ADDR_BITLEN_DEFAULT 1
 
 #define USE_ROUND_ADDR  1
 
@@ -27,21 +29,21 @@
 #define ENERGY_CHECK_TIME   24
 
 #define DEFAULT_UPLINK_LEN  4
-#define DEFAULT_DOWNLINK_LEN   8
+#define DEFAULT_DOWNLINK_LEN   (8 + READER_ADDR_BITLEN - READER_ADDR_BITLEN_DEFAULT)
 
 #define UPLINK_ACK_TIME 24  //preamble
 
 
 //#define DOWNLINK_WINDOW 8
-#define DOWNLINK_WINDOW 4
+#define DOWNLINK_WINDOW 10
 #define DOWNLINK_BITRATE 10000
 
 #define DOWN_SLOT_TIME   ((DEFAULT_DOWNLINK_LEN << 3)*1000/DOWNLINK_BITRATE)
 
-#define UPLINK_BITRATE  256
+#define UPLINK_BITRATE  128
 
-#define FRAME_MAX_LEN   72
-#define PAYLOAD_MAX_LEN 64
+#define FRAME_MAX_LEN   256
+#define PAYLOAD_MAX_LEN 240
 
 #define READER_MAX_NUM  100
 #define TAG_MAX_NUM  50
@@ -54,8 +56,12 @@
 //response type
 #define DISC_ACK    1
 #define DATA        2
-
 #define UPLINK_CANNOT_OUT   0xFF
+
+
+//request type
+#define REAL_SENT       1
+#define NOT_REAL_SENT   2
 
 
 typedef struct{
@@ -72,6 +78,7 @@ typedef struct{
     int addr;
     double posx;
     double posy;
+    int type;
     int plen;
     int start_time;
     int init_time;
@@ -122,5 +129,6 @@ extern void get_send_pos(reader_request_t *reader_request, double *x, double *y)
 
 extern void get_recv_pos(reader_request_t *reader_request, tag_response_t *tag_response, double *x, double *y);
 
+extern void calibrate_reader_pos(reader_request_t *reader_request, int cur_time, double *x, double *y);
 
 #endif

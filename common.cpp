@@ -110,6 +110,12 @@ void get_send_pos(reader_request_t *reader_request, double *x, double *y){
     *y = reader_request->posy;
 }
 
+void calibrate_reader_pos(reader_request_t *reader_request, int cur_time, double *x, double *y){
+    *x = reader_request->posx + (cur_time - reader_request->init_time) * reader_request->velocity;
+    *y = reader_request->posy;
+}
+
+
 void get_recv_pos(reader_request_t *reader_request, tag_response_t *tag_response, double *x, double *y){
     *x = reader_request->posx + (tag_response->start_time + (tag_response->plen << 3)*1000/UPLINK_BITRATE - reader_request->init_time) * reader_request->velocity;
     *y = reader_request->posy;

@@ -5,13 +5,25 @@
 #    echo $i
 #done
 
-for((velocity=0;velocity<=4;velocity++));   #velocity
+for((velocity=0;velocity<=2;velocity++));   #velocity
 do
 	for((lane_num=1;lane_num<=3;lane_num++));   #lane num
 	do
-	    for((k=10;k>=1;k--));   #tag interval
+	    for((k=1;k<=3;k++));   #tag interval
 	    do
-		    interval=`expr $k \* 10`
+            if [ $k -eq 1 ]
+            then
+                interval=10
+            fi
+            if [ $k -eq 2 ]
+            then
+                interval=50
+            fi
+            if [ $k -eq 3 ]
+            then
+                interval=100
+            fi
+#		    interval=`expr $k \* 10`
 #            echo lane${lane_num}_velocity${velocity}_spacing${interval}
             mkdir lane${lane_num}_velocity${velocity}_spacing${interval}
             cd lane${lane_num}_velocity${velocity}_spacing${interval}

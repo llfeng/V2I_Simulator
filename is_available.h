@@ -6,6 +6,9 @@
 using std::vector;
 
 
+#define SYS_FOV         20.0
+
+
 #define VEHICLE_LENGTH  4.5
 #define VEHICLE_WIDTH   2.5
 
@@ -18,6 +21,14 @@ using std::vector;
 #define VELOCITY_NUM    5
 
 #define VEHICLE_NUM_PER_LANE    10
+
+
+#define UPLINK_DISTANCE     65
+
+#define DOWNLINK_DISTANCE   (2*UPLINK_DISTANCE)
+//#define DOWNLINK_DISTANCE   (UPLINK_DISTANCE)
+
+#define TAG_SPACING_OFFSET  110
 
 
 #define X get_x()
