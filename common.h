@@ -67,6 +67,11 @@
 #define NOT_REAL_SENT   2
 
 
+#define SIGN_TYPE_MAX_NUM  LARGE_SIGN
+
+#define SMALL_SIGN      1
+#define LARGE_SIGN      2
+
 typedef struct{
     double posx;
     double posy;

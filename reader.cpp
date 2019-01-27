@@ -42,8 +42,8 @@
 
 #ifdef LOG_LEVEL   
 #undef LOG_LEVEL
-#define LOG_LEVEL 100
-//#define LOG_LEVEL FATAL
+//#define LOG_LEVEL 100
+#define LOG_LEVEL FATAL
 #endif
 
 
@@ -228,7 +228,8 @@ double g_velocity;         //unit--m/ms
 
 
 
-double g_com_dist_up;
+//double g_com_dist_up;
+double g_com_dist_up[SIGN_TYPE_MAX_NUM+1];
 double g_com_dist_down;
 double g_sys_fov;           //unit--rad
 
@@ -391,7 +392,8 @@ int updata_receive_id_table(reader_t *reader, tag_response_t *tag_response){
 
 
 void record_log(reader_t *reader, tag_response_t *tag_response){
-    double com_x_left = sqrt(pow(g_com_dist_up, 2) - pow(reader->posy,2));
+    //double com_x_left = sqrt(pow(g_com_dist_up, 2) - pow(reader->posy,2));
+    double com_x_left = sqrt(pow(g_com_dist_up[tag_response->sign_type], 2) - pow(reader->posy,2));
     double com_x_right = reader->posy / tan(g_sys_fov);
     int delta_t = tag_response->start_time + (tag_response->plen << 3) * 1000/UPLINK_BITRATE - reader->init_time;
     double x = reader->posx + delta_t * reader->velocity;
@@ -457,7 +459,8 @@ int sof_in_range(reader_t *reader, tag_response_t *tag_response){
     double start_delta_y = reader->posy - tag_response->posy;
     double start_distance = sqrt(pow(start_delta_x, 2) + pow(start_delta_y, 2));
     double start_degree = atan(fabs(start_delta_y)/fabs(start_delta_x));
-    if(start_distance < g_com_dist_up && start_degree < g_sys_fov && start_delta_x < 0){
+    //if(start_distance < g_com_dist_up && start_degree < g_sys_fov && start_delta_x < 0){
+    if(start_distance < g_com_dist_up[tag_response->sign_type] && start_degree < g_sys_fov && start_delta_x < 0){
         return 1;
     }else{
         LOG(INFO, "start_distance:%f, start_degree:%f, reader(%f, %f), tag(%f, %f), tag_rsp_start_time:%d", start_distance, start_degree, start_posx, reader->posy, tag_response->posx, tag_response->posy, tag_response->start_time);
@@ -653,7 +656,8 @@ int in_range(reader_request_t *reader_request, tag_response_t *tag_response){
     double distance = sqrt(pow(delta_x, 2) + pow(delta_y, 2));
     double degree = atan(fabs(delta_y)/fabs(delta_x));
     
-    if(distance < g_com_dist_up && degree < g_sys_fov && delta_x < 0){
+    //if(distance < g_com_dist_up && degree < g_sys_fov && delta_x < 0){
+    if(distance < g_com_dist_up[tag_response->sign_type] && degree < g_sys_fov && delta_x < 0){
         if(be_blocked(reader_request, tag_response)){
             return 0;
         }else{
@@ -1234,8 +1238,10 @@ int main(int argc, char *argv[]){
         printf("g_velocity:%f\n", g_velocity);
 
         g_com_dist_down = DOWNLINK_DISTANCE;
-        g_com_dist_up = UPLINK_DISTANCE;
-//        g_com_dist_down = g_com_dist_up = 100.0;
+//        g_com_dist_up = UPLINK_DISTANCE;
+        g_com_dist_up[SMALL_SIGN] = SMALL_SIGN_UPLINK_DISTANCE;
+        g_com_dist_up[LARGE_SIGN] = LARGE_SIGN_UPLINK_DISTANCE;
+
         g_sys_fov = SYS_FOV/2*PI/180;
 
         g_car_num_per_lane = VEHICLE_NUM_PER_LANE;

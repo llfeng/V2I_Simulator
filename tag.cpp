@@ -44,8 +44,8 @@ using namespace std;
 
 #ifdef LOG_LEVEL
 #undef LOG_LEVEL
-//#define LOG_LEVEL   FATAL
-#define LOG_LEVEL   100
+#define LOG_LEVEL   FATAL
+//#define LOG_LEVEL   100
 #endif
 
 #define USE_ROUND_ADDR 1
@@ -130,6 +130,7 @@ typedef struct{
     double posy;
     int start_time;
     int busy_time;
+    int sign_type;
 }tag_t;
 
 
@@ -281,6 +282,7 @@ void send_to_proxy(tag_t *tag){
     rsp->posx = tag->posx;
     rsp->posy = tag->posy;
     rsp->type = DATA;
+    rsp->sign_type = tag->sign_type;
     
     tag->busy_time = rsp->start_time + (rsp->plen << 3) * 1000/UPLINK_BITRATE;
 
@@ -401,13 +403,13 @@ void parse_downlink(tag_t *tag, reader_request_t *req){     //mac
     if(frame_state == DISCOVERY_REQUEST){
         char plen = buf[3] & 0x0F;
         LOG(INFO, "%ld--recv:%02x %02x %02x %02x", time(NULL), buf[0], buf[1], buf[2], buf[3]);
+#if 0        
         printf("start---silent tab[%d]\n", tag->silent_num);
         for(int i = 0; i < tag->silent_num; i++){
             printf("silent reader:%d, time:%d\n", tag->silent[i].reader, tag->silent[i].time);
-            
         }
         printf("end---silent\n");
-
+#endif
         for(int i = 0; i < plen; i += 3){
             //LOG(INFO, "%02x %02x ", buf[i+4], buf[i+5]);
             if(lookup_alias(tag, buf[i+4], buf[i+5], buf[i+6], 1) == 1){
@@ -462,7 +464,7 @@ tag_t *create_tag(){
     return tag;
 }
 
-void tag_init(tag_t *tag, int conn, double posx, double posy){
+void tag_init(tag_t *tag, int conn, double posx, double posy, int sign_type){
     tag->alias_num = 0;
     memset(tag->alias, 0, sizeof(tag->alias));
 
@@ -475,6 +477,8 @@ void tag_init(tag_t *tag, int conn, double posx, double posy){
     tag->conn = conn;
     tag->posx = posx;
     tag->posy = posy;
+
+    tag->sign_type = sign_type;
 }
 
 
@@ -518,14 +522,19 @@ int in_range(reader_request_t *reader_request, tag_t *tag){
     }   
 }
 
+typedef struct{
+    double posx;
+    int type;
+} sign_info_t;
 
 void *tag_thread(void *arg){
 	tag_t *tag = create_tag();
     int conn = unix_domain_client_init(tag_proxy_path);
     //int posx = *((int *)arg);
-    double posx = ((double *)arg)[0];
+    double posx = ((sign_info_t *)arg)[0].posx;
     double posy = 0;
-    tag_init(tag, conn, posx, posy);
+    int sign_type = ((sign_info_t *)arg)[0].type;
+    tag_init(tag, conn, posx, posy, sign_type);
     reader_request_t *reader_request_tbl[READER_MAX_NUM] = {NULL};
     int in_range_req_num;
     while(1){
@@ -535,7 +544,7 @@ void *tag_thread(void *arg){
         if(memcmp((char *)req_bat, "RESET", strlen("RESET")) == 0){
             free(req_bat);
             printf("[%s]--RESET\n", __func__);
-            tag_init(tag, conn, posx, posy);
+            tag_init(tag, conn, posx, posy, sign_type);
             continue;
         }else if(memcmp((char *)req_bat, "KILL", strlen("KILL")) == 0){
             free(req_bat);
@@ -625,7 +634,10 @@ void send_to_tag(tag_info_t *tag_info, char *buf, int buflen){
 
 void *tag_proxy(void *arg){
     double tag_pos[TAG_MAX_NUM];
+    sign_info_t sign_info[TAG_MAX_NUM];
+
     memset(tag_pos, 0, sizeof(tag_pos));
+    memset(sign_info, 0, sizeof(sign_info_t));
 
     int tag_conn[TAG_MAX_NUM];
 
@@ -635,7 +647,11 @@ void *tag_proxy(void *arg){
 
     int tag_index = 0;
     for(int i = 0; i < TAG_AXIS_NUM; i++){
-        tag_pos[tag_index++] = TAG_SPACING_OFFSET + i * g_spacing;        
+//        tag_pos[tag_index++] = TAG_SPACING_OFFSET + i * g_spacing;        
+        sign_info[tag_index].posx = TAG_SPACING_OFFSET + i * g_spacing;
+        sign_info[tag_index].type = LARGE_SIGN;
+        tag_index++;
+
         int internal_tag_num = random()%EACH_SPACING_MAX_TAG_NUM;
         double insert_tag[10];
         int insert_count = 0;
@@ -643,14 +659,20 @@ void *tag_proxy(void *arg){
             insert_tag[insert_count++] = TAG_SPACING_OFFSET + i * g_spacing + random()%(int)g_spacing;  
         }
         sort(insert_tag, insert_tag+insert_count);
-        memcpy(&tag_pos[tag_index], insert_tag, insert_count * sizeof(double));
-        tag_index += insert_count;
+        for(int j = 0; j < internal_tag_num; j++){
+            sign_info[tag_index].posx = insert_tag[j];
+            sign_info[tag_index].type = random()%2 + SMALL_SIGN;
+            tag_index++;
+        }
+//        memcpy(&tag_pos[tag_index], insert_tag, insert_count * sizeof(double));
+//        tag_index += insert_count;
     }
     tag_num = tag_index;
     for(int i = 0; i < tag_num; i++){
-        printf("tag[%d]:(%f,%f)\n", i, tag_pos[i], 0.0) ;
+        printf("tag[%d]:(%f,%f), type:%d\n", i, sign_info[i].posx, 0.0, sign_info[i].type) ;
 //        tag_pos[i] = i * g_spacing + TAG_SPACING_OFFSET;
-        pthread_create(&thread_tab[i], NULL, tag_thread, (void *)&tag_pos[i]);
+//        pthread_create(&thread_tab[i], NULL, tag_thread, (void *)&tag_pos[i]);
+        pthread_create(&thread_tab[i], NULL, tag_thread, (void *)&sign_info[i]);
     }   
 
 

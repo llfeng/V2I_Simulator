@@ -1,11 +1,16 @@
-
 #include "is_available.h"
 #include <algorithm>
 #include <cassert>
+using namespace std;
+
+
+#ifdef DEBUG_INTERSECT
+#include <cstdio>
+#include <iostream>
+#endif
 
 using std::max;
 using std::min;
-
 
 const double EPS = 1e-8;
 
@@ -21,7 +26,7 @@ struct Line {
 };
 
 struct Vehicle {
-	Point light;
+	Point light[2];
 	Line car_lines[4];
 
 	Vehicle(const Point &light_);
@@ -66,19 +71,26 @@ bool Line::is_intersect(const Line &line) const {
 // class Vehicle
 
 Vehicle::Vehicle(const Point &light_) {
-	light = light_;
-	Point l = light + Point(-EPS, 0);
+
+	light[0] = light_ + Point(0, -VEHICLE_WIDTH/2);
+	light[1] = light_ + Point(0, VEHICLE_WIDTH/2);
+	Point l = light_ + Point(-EPS, 0);
 	
-#if 0    
-	Point	a(l + Point(0, -1.5)),
-		b(l + Point(0, 1.5)),
-		c(l + Point(-5, 1.5)),
-		d(l + Point(-5, -1.5));
-#endif       
 	Point	a(l + Point(0, -VEHICLE_WIDTH/2)),
 		b(l + Point(0, VEHICLE_WIDTH/2)),
 		c(l + Point(-VEHICLE_LENGTH, VEHICLE_WIDTH/2)),
 		d(l + Point(-VEHICLE_LENGTH, -VEHICLE_WIDTH/2));
+
+#if 0
+	light[0] = light_ + Point(0, -1.25);
+	light[1] = light_ + Point(0, 1.25);
+	Point l = light_ + Point(-EPS, 0);
+	
+	Point	a(l + Point(0, -1.25)),
+		b(l + Point(0, 1.25)),
+		c(l + Point(-4.5, 1.25)),
+		d(l + Point(-4.5, -1.25));
+#endif        
 	car_lines[0] = Line(a, b);
 	car_lines[1] = Line(b, c);
 	car_lines[2] = Line(c, d);
@@ -88,7 +100,8 @@ Vehicle::Vehicle(const Point &light_) {
 Vehicle::Vehicle(const Vehicle &vehicle) {
 	for (int i = 0; i < 4; i++)
 		car_lines[i] = vehicle.car_lines[i];
-	light = vehicle.light;
+	light[0] = vehicle.light[0];
+	light[1] = vehicle.light[1];
 }
 
 bool Vehicle::is_intersect(const Line &line) const {
@@ -110,13 +123,28 @@ bool is_intersect(const vector<Point> &lights,
 		// 让车灯不和车的前端重合
 		vehicles.push_back(Vehicle(light));
 	// 车灯到路标的连线
-	Line line(lights[which], sign);
-	// 逐车判断
+	Line line1(vehicles[which].light[0], sign);
+	Line line2(vehicles[which].light[1], sign);
+	// 第一个车灯
+	bool line1_available = true, line2_available = true;
 	for (auto &vehicle : vehicles) {
-		if (vehicle.is_intersect(line))
-			return true;
+		if (vehicle.is_intersect(line1)) {
+			//cout << "Intersect with " << (vehicle.light[0] + Point(0, 1.25)).x
+			//	<< (vehicle.light[0] + Point(0, 1.25)).y << endl;
+			line1_available = false;
+			break;
+		}
 	}
-	return false;
+	// 第二个车灯
+	for (auto &vehicle : vehicles) {
+		if (vehicle.is_intersect(line2)) {
+			//cout << "Intersect with " << (vehicle.light[0] + Point(0, 1.25)).x
+			//	<< (vehicle.light[0] + Point(0, 1.25)).y << endl;
+			line2_available = false;
+			break;
+		}
+	}
+	return !line1_available && !line2_available;
 }
 
 static bool interval_is_intersect(double a, double b, double c, double d) {
@@ -131,14 +159,21 @@ static bool interval_is_intersect(double a, double b, double c, double d) {
 
 #ifdef DEBUG_INTERSECT
 int main() {
+	FILE *f = fopen("D:\\soar pku\\PassiveVLC_kuntai\\mac\\mac\\test.txt", "r");
 	// a little test
 	vector<Point> lights;
-	lights.push_back(Point(-12, 9));
+	double x, y;
+	while (fscanf(f, "(%lf, %lf)\n", &x, &y) > 0) {
+		lights.push_back(Point(x, y));
+	}
+	cout << is_intersect(lights, Point(110, 0), 0);
+	system("pause");
+	/*lights.push_back(Point(-12, 9));
 	lights.push_back(Point(-8.1, 4.5));
 	// should be false
 	assert(is_intersect(lights, Point(0, 0), 0) == 0);
 	lights.push_back(Point(-7.9, 4.5));
 	// should be true
-	assert(is_intersect(lights, Point(0, 0), 0) == 1);
+	assert(is_intersect(lights, Point(0, 0), 0) == 1);*/
 }
 #endif
