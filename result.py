@@ -23,8 +23,8 @@ def fetch_data(filename):
 #            com_x_right = float(pos_item[2]) / math.tan(g_sys_fov);
 #            com_dist = com_x_left-com_x_right
 #            remain_dist = float(pos_item[3]) - float(pos_item[1]) - com_x_right
-            com_dist = pos_item[5]
-            remain_dist = pos_item[6] 
+            com_dist = float(pos_item[5])
+            remain_dist = float(pos_item[6])
 
             RTB.append((com_dist-remain_dist)/com_dist)
             RDB.append(remain_dist/com_dist)
@@ -61,7 +61,7 @@ def fetch_result(lane, velocity, spacing):
     return list_average(res_RTB), list_average(res_RDB),res_fail_count, res_item_count
 
 velocity = [30, 50, 70]
-spacing = [10, 50, 100]
+spacing = [100, 500, 1000]
 
 '''
 fetch_data("/home/llfeng/VLC/simulator/RetroI2V_MAC/USE_ROUND/root/lane1_velocity2_spacing100/result-2019-01-26_23_35_39_lane1_velocity2_spacing100.csv")
