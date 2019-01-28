@@ -654,7 +654,7 @@ void *tag_proxy(void *arg){
     for(int i = 0; i < TAG_AXIS_NUM; i++){
 //        tag_pos[tag_index++] = TAG_SPACING_OFFSET + i * g_spacing;        
         sign_info[tag_index].posx = TAG_SPACING_OFFSET + i * g_spacing;
-        sign_info[tag_index].type = LARGE_SIGN;
+        sign_info[tag_index].type = DEFAULT_SIGN_TYPE;
         tag_index++;
 
 #if RANDOM_INSERT_TAG

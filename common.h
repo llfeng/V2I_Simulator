@@ -76,6 +76,7 @@
 #define SMALL_SIGN      1
 #define LARGE_SIGN      2
 
+//#define DEFAULT_SIGN_TYPE 
 
 typedef struct{
     double posx;
