@@ -1301,10 +1301,12 @@ int main(int argc, char *argv[]){
 
     time_t t = time(0);    
     struct tm ttt = *localtime(&t);
-    sprintf(log_path, "trace-%4d-%02d-%02d_%02d_%02d_%02d_random%d_bps%d_lane%d_velocity%d_spacing%d.log", ttt.tm_year + 1900, ttt.tm_mon + 1, ttt.tm_mday, ttt.tm_hour, ttt.tm_min, ttt.tm_sec, RANDOM_INSERT_TAG, UPLINK_BITRATE, g_lane_num, g_velocity_type, g_tag_spacing);
+    sprintf(log_path, "trace-%4d-%02d-%02d_%02d_%02d_%02d_random%d_bps%d_signtype%d_lane%d_velocity%d_spacing%d.log", ttt.tm_year + 1900, ttt.tm_mon + 1, ttt.tm_mday, ttt.tm_hour, ttt.tm_min, ttt.tm_sec, 
+    RANDOM_INSERT_TAG, UPLINK_BITRATE, DEFAULT_SIGN_TYPE, g_lane_num, g_velocity_type, g_tag_spacing);
     g_log_file_fd = open(log_path, O_RDWR|O_CREAT, 0664);
 
-    sprintf(res_path, "result-%4d-%02d-%02d_%02d_%02d_%02d_random%d_bps%d_lane%d_velocity%d_spacing%d.csv", ttt.tm_year + 1900, ttt.tm_mon + 1, ttt.tm_mday, ttt.tm_hour, ttt.tm_min, ttt.tm_sec, RANDOM_INSERT_TAG, UPLINK_BITRATE, g_lane_num, g_velocity_type, g_tag_spacing);
+    sprintf(res_path, "result-%4d-%02d-%02d_%02d_%02d_%02d_random%d_bps%d_signtype%d_lane%d_velocity%d_spacing%d.csv", ttt.tm_year + 1900, ttt.tm_mon + 1, ttt.tm_mday, ttt.tm_hour, ttt.tm_min, ttt.tm_sec, 
+    RANDOM_INSERT_TAG, UPLINK_BITRATE, DEFAULT_SIGN_TYPE, g_lane_num, g_velocity_type, g_tag_spacing);
     g_res_file_fd = open(res_path, O_RDWR|O_CREAT, 0664);
 
     trace_fd = unix_domain_client_init(trace_sock_path);
