@@ -10,7 +10,7 @@ else
 	CFLAG += -DUPLINK_BITRATE=256
 endif
 
-ifeq ($(signtype) 1)
+ifeq ($(signtype), 1)
 	CFLAG += -DDEFAULT_SIGN_TYPE=1
 else
 	CFLAG += -DDEFAULT_SIGN_TYPE=2
