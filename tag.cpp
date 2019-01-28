@@ -810,7 +810,7 @@ int main(int argc, char *argv[]){
 //        tag_num = TAG_ROAD_LENGTH/g_spacing;
 //        g_velocity = atof(argv[4])/3600;
         g_com_dist_down = DOWNLINK_DISTANCE;
-        g_sys_fov = 20.0/2*PI/180;
+        g_sys_fov = SYS_FOV/2*PI/180;
     }else{
         usage(argv[0]);
         return 0;
