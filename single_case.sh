@@ -9,7 +9,7 @@ interval=$3
 		    do
 		        ./tag $interval &
 		        sleep 1
-		        ./reader $lane_num $velocity $interval
+		        ./reader $lane_num $velocity $interval 
 		        sleep 1
 		    done
 

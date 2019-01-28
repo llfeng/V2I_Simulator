@@ -24,18 +24,20 @@ using std::vector;
 
 
 //#define UPLINK_DISTANCE     65
-#if 1       //128bps
+#if (UPLINK_BITRATE == 128)       //128bps
 #define SMALL_SIGN_UPLINK_DISTANCE  80
 #define LARGE_SIGN_UPLINK_DISTANCE  96
-#else       //256bps
+#elif (UPLINK_BITRATE == 256)       //256bps
 #define SMALL_SIGN_UPLINK_DISTANCE  67
 #define LARGE_SIGN_UPLINK_DISTANCE  83
+#else
+ERROR
 #endif
 
 
 //#define DOWNLINK_DISTANCE   (2*UPLINK_DISTANCE)
 //#define DOWNLINK_DISTANCE   (UPLINK_DISTANCE)
-#define DOWNLINK_DISTANCE       100
+#define DOWNLINK_DISTANCE       150
 
 #define TAG_SPACING_OFFSET  110
 

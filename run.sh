@@ -5,6 +5,7 @@
 #    echo $i
 #done
 
+
 for((velocity=0;velocity<=2;velocity++));   #velocity
 do
 	for((lane_num=1;lane_num<=3;lane_num++));   #lane num
@@ -31,13 +32,6 @@ do
             ./single_case.sh $lane_num $velocity $interval & 
             sleep 1
             cd ..
-#		    for((m=1;m<=100;m++)); 
-#		    do
-#		        ./tag $interval &
-#		        sleep 1
-#		        ./reader $lane_num $velocity $interval
-#		        sleep 1
-#		    done
 	    done
 	done
 done
