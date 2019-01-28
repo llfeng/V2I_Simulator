@@ -13,7 +13,13 @@ static double convert(double deg) {
 	return pi * deg / 180;
 }
 
-bool is_connected(double distance, double cos_angle, double max_distance, double fov = 60) {
+
+bool is_connected(double distance, double cos_angle, double max_distance) {
+    return is_connected(distance, cos_angle, max_distance, convert(60));
+}
+
+
+bool is_connected(double distance, double cos_angle, double max_distance, double fov) {
 //	if (cos_angle < cos(convert(fov)))
 	if (cos_angle < cos(fov))
 		return false;

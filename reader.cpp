@@ -395,11 +395,17 @@ int updata_receive_id_table(reader_t *reader, tag_response_t *tag_response){
 
 void record_log(reader_t *reader, tag_response_t *tag_response){
     //double com_x_left = sqrt(pow(g_com_dist_up, 2) - pow(reader->posy,2));
-#if 1
+#if 0
     double com_x_left = sqrt(pow(g_com_dist_up[tag_response->sign_type], 2) - pow(reader->posy,2));
     double com_x_right = reader->posy / tan(g_sys_fov);
 #else
-    get_xaxis_range(reader->posy, tag_response->posx, tag_response->posy, g_com_dist_up[tag_response->sign_type], com_x_left, com_x_right);
+    double com_x_left, com_x_right;
+    if(get_xaxis_range(reader->posy, tag_response->posx, tag_response->posy, g_com_dist_up[tag_response->sign_type], com_x_left, com_x_right) < 0){
+        while(1){
+            printf("[%s]---ERROR HERE!\n", __func__);
+        }
+    }
+    printf("l:%f, r:%f\n", com_x_left, com_x_right);
 #endif
     int delta_t = tag_response->start_time + (tag_response->plen << 3) * 1000/UPLINK_BITRATE + PREAMBLE_TIME - reader->init_time;
     double x = reader->posx + delta_t * reader->velocity;
@@ -414,7 +420,11 @@ void record_log(reader_t *reader, tag_response_t *tag_response){
 //    RECORD_TRACE(g_res_file_fd, res_s, "%d,%f,%f,%f,%f\n", reader->uuid, x, reader->posy, tag_response->posx, tag_response->posy);
 //    double l,r;    
 //    get_xaxis_range(reader->posy, tag_response->posx, tag_response->posy, g_com_dist_up[tag_response->sign_type], l, r);
+#if 0
     RECORD_TRACE(g_res_file_fd, res_s, "%d,%f,%f,%f,%f,%f,%f\n", reader->uuid, x, reader->posy, tag_response->posx, tag_response->posy, com_x_left-com_x_right, tag_response->posx - x - com_x_right);
+#else    
+    RECORD_TRACE(g_res_file_fd, res_s, "%d,%f,%f,%f,%f,%f,%f\n", reader->uuid, x, reader->posy, tag_response->posx, tag_response->posy, com_x_right-com_x_left, com_x_right - x);
+#endif    
     //reader_uuid, reader_posx, reader_posy, tag_posx, tag_posy, comm_dist, remain_dist
 
     
