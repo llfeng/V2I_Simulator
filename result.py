@@ -19,12 +19,13 @@ def fetch_data(filename):
         item_count = item_count + 1
         pos_item = line.split(',')
         if float(pos_item[3]) > float(pos_item[1]):
-            com_x_left = math.sqrt(pow(g_com_dist_up, 2) - pow(float(pos_item[2]),2));
-            com_x_right = float(pos_item[2]) / math.tan(g_sys_fov);
-            com_dist = com_x_left-com_x_right
-            remain_dist = float(pos_item[3]) - float(pos_item[1]) - com_x_right
-#            print("comdist:"+str(com_dist))
-#            print("redist:"+str(remain_dist))
+#            com_x_left = math.sqrt(pow(g_com_dist_up, 2) - pow(float(pos_item[2]),2));
+#            com_x_right = float(pos_item[2]) / math.tan(g_sys_fov);
+#            com_dist = com_x_left-com_x_right
+#            remain_dist = float(pos_item[3]) - float(pos_item[1]) - com_x_right
+            com_dist = pos_item[5]
+            remain_dist = pos_item[6] 
+
             RTB.append((com_dist-remain_dist)/com_dist)
             RDB.append(remain_dist/com_dist)
         else:

@@ -39,6 +39,8 @@
 #include "common.h"
 #include "log.h"
 #include "is_available.h"
+#include "lambertian.h"
+
 
 #ifdef LOG_LEVEL   
 #undef LOG_LEVEL
@@ -203,7 +205,7 @@ char trace_type[TRACE_TYPE_NUM][NAME_MAX_LEN] = {
 };
 
 
-double g_tag_pos[TAG_MAX_NUM];
+double g_tag_pos[TAG_MAX_NUM] = {0.0};
 
 pthread_mutex_t reader_mutex;
 
@@ -393,9 +395,13 @@ int updata_receive_id_table(reader_t *reader, tag_response_t *tag_response){
 
 void record_log(reader_t *reader, tag_response_t *tag_response){
     //double com_x_left = sqrt(pow(g_com_dist_up, 2) - pow(reader->posy,2));
+#if 1
     double com_x_left = sqrt(pow(g_com_dist_up[tag_response->sign_type], 2) - pow(reader->posy,2));
     double com_x_right = reader->posy / tan(g_sys_fov);
-    int delta_t = tag_response->start_time + (tag_response->plen << 3) * 1000/UPLINK_BITRATE - reader->init_time;
+#else
+    get_xaxis_range(reader->posy, tag_response->posx, tag_response->posy, g_com_dist_up[tag_response->sign_type], com_x_left, com_x_right);
+#endif
+    int delta_t = tag_response->start_time + (tag_response->plen << 3) * 1000/UPLINK_BITRATE + PREAMBLE_TIME - reader->init_time;
     double x = reader->posx + delta_t * reader->velocity;
     char log_s[512];
     char res_s[512];
@@ -405,7 +411,12 @@ void record_log(reader_t *reader, tag_response_t *tag_response){
             delta_t + reader->init_time, get_tag_uuid(tag_response), tag_response->posx, tag_response->posy, reader->addr, x, reader->posy, com_x_left-com_x_right, tag_response->posx - x - com_x_right, com_x_left, com_x_right);
     //RECORD_TRACE(g_res_file_fd, res_s, "%f, %f, %f\n", reader->posy, com_x_left-com_x_right, tag_response->posx - x - com_x_right);
     //RECORD_TRACE(g_res_file_fd, res_s, "reader_uuid:%d, reader(%f,%f), tag(%f,%f)\n", reader->uuid, x, reader->posy, tag_response->posx, tag_response->posy);
-    RECORD_TRACE(g_res_file_fd, res_s, "%d,%f,%f,%f,%f\n", reader->uuid, x, reader->posy, tag_response->posx, tag_response->posy);
+//    RECORD_TRACE(g_res_file_fd, res_s, "%d,%f,%f,%f,%f\n", reader->uuid, x, reader->posy, tag_response->posx, tag_response->posy);
+//    double l,r;    
+//    get_xaxis_range(reader->posy, tag_response->posx, tag_response->posy, g_com_dist_up[tag_response->sign_type], l, r);
+    RECORD_TRACE(g_res_file_fd, res_s, "%d,%f,%f,%f,%f,%f,%f\n", reader->uuid, x, reader->posy, tag_response->posx, tag_response->posy, com_x_left-com_x_right, tag_response->posx - x - com_x_right);
+    //reader_uuid, reader_posx, reader_posy, tag_posx, tag_posy, comm_dist, remain_dist
+
     
     for(int i = 0; i < TAG_MAX_NUM; i++){
         if(abs(tag_response->posx - g_tag_pos[i]) < 1e-8){
@@ -449,7 +460,7 @@ bool tag_response_cmp_ascent(tag_response_t a, tag_response_t b){
 }
 
 bool tag_response_end_cmp_ascent(tag_response_t a, tag_response_t b){
-    return a.start_time + (a.plen << 3) * 1000/UPLINK_BITRATE < b.start_time + (b.plen << 3) * 1000/UPLINK_BITRATE; 
+    return a.start_time + (a.plen << 3) * 1000/UPLINK_BITRATE + PREAMBLE_TIME < b.start_time + (b.plen << 3) * 1000/UPLINK_BITRATE + PREAMBLE_TIME; 
 }
 
 int sof_in_range(reader_t *reader, tag_response_t *tag_response){
@@ -459,6 +470,13 @@ int sof_in_range(reader_t *reader, tag_response_t *tag_response){
     double start_delta_y = reader->posy - tag_response->posy;
     double start_distance = sqrt(pow(start_delta_x, 2) + pow(start_delta_y, 2));
     double start_degree = atan(fabs(start_delta_y)/fabs(start_delta_x));
+#if 1 
+    if(is_connected(start_distance, cos(start_degree), g_com_dist_up[tag_response->sign_type], g_sys_fov)){
+        return 1;
+    }else{
+        return 0;
+    }
+#else    
     //if(start_distance < g_com_dist_up && start_degree < g_sys_fov && start_delta_x < 0){
     if(start_distance < g_com_dist_up[tag_response->sign_type] && start_degree < g_sys_fov && start_delta_x < 0){
         return 1;
@@ -466,6 +484,7 @@ int sof_in_range(reader_t *reader, tag_response_t *tag_response){
         LOG(INFO, "start_distance:%f, start_degree:%f, reader(%f, %f), tag(%f, %f), tag_rsp_start_time:%d", start_distance, start_degree, start_posx, reader->posy, tag_response->posx, tag_response->posy, tag_response->start_time);
         return 0;
     }
+#endif    
 }
 
 void piggyback_data_handler(reader_t *reader, tag_response_t *tag_response_tbl, int rsp_num){       //not for me
@@ -504,7 +523,7 @@ void piggyback_data_handler(reader_t *reader, tag_response_t *tag_response_tbl, 
 
 void handler_piggyback_response(tag_response_t *tag_response_tbl, reader_t *reader, int rsp_num){
     sort(tag_response_tbl, tag_response_tbl + rsp_num, tag_response_end_cmp_ascent);
-    reader->carrier_block_time = tag_response_tbl[rsp_num - 1].start_time + (tag_response_tbl[rsp_num - 1].plen << 3) * 1000/UPLINK_BITRATE;
+    reader->carrier_block_time = tag_response_tbl[rsp_num - 1].start_time + (tag_response_tbl[rsp_num - 1].plen << 3) * 1000/UPLINK_BITRATE + PREAMBLE_TIME;
     piggyback_data_handler(reader, tag_response_tbl, rsp_num);
 }
 
@@ -647,7 +666,7 @@ int in_range(reader_request_t *reader_request, tag_response_t *tag_response){
     
 
 //end of frame
-    double cur_posx = reader_request->posx + (tag_response->start_time + (tag_response->plen << 3)*1000/UPLINK_BITRATE - reader_request->init_time) * reader_request->velocity;
+    double cur_posx = reader_request->posx + (tag_response->start_time + (tag_response->plen << 3)*1000/UPLINK_BITRATE + PREAMBLE_TIME - reader_request->init_time) * reader_request->velocity;
     double delta_x = cur_posx  - tag_response->posx;
     if(delta_x > 0){
         return 0;
@@ -656,6 +675,14 @@ int in_range(reader_request_t *reader_request, tag_response_t *tag_response){
     double distance = sqrt(pow(delta_x, 2) + pow(delta_y, 2));
     double degree = atan(fabs(delta_y)/fabs(delta_x));
     
+#if 1 
+    if(is_connected(distance, cos(degree), g_com_dist_up[tag_response->sign_type], g_sys_fov)){
+        return 1;
+    }else{
+        return 0;
+    }
+    
+#else
     //if(distance < g_com_dist_up && degree < g_sys_fov && delta_x < 0){
     if(distance < g_com_dist_up[tag_response->sign_type] && degree < g_sys_fov && delta_x < 0){
         if(be_blocked(reader_request, tag_response)){
@@ -668,6 +695,7 @@ int in_range(reader_request_t *reader_request, tag_response_t *tag_response){
     }else{
         return 0;
     }
+#endif    
 }
 
 char get_dst_addr(tag_response_t *rsp){
@@ -683,12 +711,12 @@ void handler_tag_response(tag_response_t *tag_response_tbl, reader_t *reader, in
     if(rsp_num > 2){
         //UPLINK COLLISION
         sort(tag_response_tbl, tag_response_tbl + rsp_num, tag_response_end_cmp_ascent);
-        reader->carrier_block_time = tag_response_tbl[rsp_num - 1].start_time + (tag_response_tbl[rsp_num - 1].plen << 3) * 1000/UPLINK_BITRATE;
+        reader->carrier_block_time = tag_response_tbl[rsp_num - 1].start_time + (tag_response_tbl[rsp_num - 1].plen << 3) * 1000/UPLINK_BITRATE + PREAMBLE_TIME;
         uplink_collision_handler(reader); 
     }else if(rsp_num == 2){
             if(((tag_response_tbl[0].type == DISC_ACK) && (tag_response_tbl[1].type == DATA))){
                 //UPLINK DATA
-                reader->carrier_block_time = tag_response_tbl[1].start_time + (tag_response_tbl[1].plen<<3)*1000/UPLINK_BITRATE;
+                reader->carrier_block_time = tag_response_tbl[1].start_time + (tag_response_tbl[1].plen<<3)*1000/UPLINK_BITRATE + PREAMBLE_TIME;
                 if(get_dst_addr(&tag_response_tbl[1]) == reader->addr){
                     uplink_ack_handler(reader);
                     uplink_data_handler(reader, &tag_response_tbl[1]);
@@ -698,11 +726,11 @@ void handler_tag_response(tag_response_t *tag_response_tbl, reader_t *reader, in
             }else{
                 //UPLINK COLLISION
                 sort(tag_response_tbl, tag_response_tbl + rsp_num, tag_response_end_cmp_ascent);
-                reader->carrier_block_time = tag_response_tbl[rsp_num - 1].start_time + (tag_response_tbl[rsp_num - 1].plen << 3) * 1000/UPLINK_BITRATE;
+                reader->carrier_block_time = tag_response_tbl[rsp_num - 1].start_time + (tag_response_tbl[rsp_num - 1].plen << 3) * 1000/UPLINK_BITRATE + PREAMBLE_TIME;
                 uplink_collision_handler(reader);
             }
     }else{
-        reader->carrier_block_time = tag_response_tbl[0].start_time + (tag_response_tbl[rsp_num - 1].plen << 3) * 1000/UPLINK_BITRATE;
+        reader->carrier_block_time = tag_response_tbl[0].start_time + (tag_response_tbl[rsp_num - 1].plen << 3) * 1000/UPLINK_BITRATE + PREAMBLE_TIME;
         if(sof_in_range(reader, &tag_response_tbl[0])){
             //        LOG(INFO, "carrier_block_time:%d, tag_response_tbl[0].start_time:%d, tag_response_tbl[rsp_num - 1].plen:%d", reader->carrier_block_time, tag_response_tbl[0].start_time, tag_response_tbl[rsp_num - 1].plen);
             if(get_dst_addr(&tag_response_tbl[0]) == reader->addr){
@@ -881,7 +909,8 @@ void *reader_thread(void *arg){
         for(int i = 0; i < TAG_MAX_NUM; i++){
             if((abs(g_tag_pos[i]) > 1e-8) && cur_posx > g_tag_pos[i]){
                 if(reader->recorded[i] == 0){
-                    RECORD_TRACE(g_res_file_fd, res_s, "%d,%f,%f,%f,%f\n", reader->uuid, cur_posx, reader->posy, (double)(TAG_SPACING_OFFSET + (tag_num-1)*g_tag_spacing), 0.0);   
+                    //RECORD_TRACE(g_res_file_fd, res_s, "%d,%f,%f,%f,%f,%f,%f\n", reader->uuid, cur_posx, reader->posy, (double)(TAG_SPACING_OFFSET + (tag_num-1)*g_tag_spacing), 0.0, 0.0, 0.0);   
+                    RECORD_TRACE(g_res_file_fd, res_s, "%d,%f,%f,%f,%f,%f,%f\n", reader->uuid, cur_posx, reader->posy, g_tag_pos[i], 0.0, 0.0, 0.0);   
                     reader->recorded[i] = 1;
                     g_receive_item_count++;
                 }
@@ -1116,10 +1145,14 @@ void *reader_proxy(void *arg){
 
     int remote_clientfd = unix_domain_client_init(simulator_server_path);
 
-    memset(g_tag_pos, 0, sizeof(g_tag_pos));
-    read(remote_clientfd, g_tag_pos, sizeof(g_tag_pos));
-    for(int i = 0; i < READER_MAX_NUM; i++){
-        printf("tag[%d]:(%f, %f)\n", i, g_tag_pos[i], 0.0);
+    memset(g_tag_pos, 0.0, sizeof(g_tag_pos));
+    sign_info_t sign_info[TAG_MAX_NUM];
+    //read(remote_clientfd, g_tag_pos, sizeof(g_tag_pos));
+    read(remote_clientfd, sign_info, sizeof(sign_info));
+
+    for(int i = 0; i < TAG_MAX_NUM; i++){
+        printf("tag[%d]:(%f, %f)\n", i, sign_info[i].posx, 0.0);
+        g_tag_pos[i] = sign_info[i].posx;
     }
 
     for(int i = 0; i < reader_num; i++){

@@ -20,7 +20,9 @@
 #define __COMMON_H__
 
 
-#define TAG_AXIS_NUM 50
+#define RANDOM_INSERT_TAG 0
+
+#define TAG_AXIS_NUM 20
 #define EACH_SPACING_MAX_TAG_NUM 3
 
 #define READER_ADDR_BITLEN  1
@@ -28,6 +30,7 @@
 
 #define USE_ROUND_ADDR  1
 
+#define PREAMBLE_TIME   24
 
 #define ENERGY_CHECK_TIME   24
 
@@ -49,6 +52,7 @@
 #define PAYLOAD_MAX_LEN 240
 
 #define READER_MAX_NUM  100
+//#define READER_MAX_NUM  200
 #define TAG_MAX_NUM  (TAG_AXIS_NUM*EACH_SPACING_MAX_TAG_NUM)
 
 
@@ -71,6 +75,14 @@
 
 #define SMALL_SIGN      1
 #define LARGE_SIGN      2
+
+
+typedef struct{
+    double posx;
+    int type;
+} sign_info_t;
+
+
 
 typedef struct{
     double posx;

@@ -6,7 +6,7 @@
 using std::vector;
 
 
-#define SYS_FOV         20.0
+#define SYS_FOV         120.0
 
 
 #define VEHICLE_LENGTH  4.5
@@ -24,8 +24,14 @@ using std::vector;
 
 
 //#define UPLINK_DISTANCE     65
-#define SMALL_SIGN_UPLINK_DISTANCE  40
-#define LARGE_SIGN_UPLINK_DISTANCE  65
+#if 1       //128bps
+#define SMALL_SIGN_UPLINK_DISTANCE  80
+#define LARGE_SIGN_UPLINK_DISTANCE  96
+#else       //256bps
+#define SMALL_SIGN_UPLINK_DISTANCE  67
+#define LARGE_SIGN_UPLINK_DISTANCE  83
+#endif
+
 
 //#define DOWNLINK_DISTANCE   (2*UPLINK_DISTANCE)
 //#define DOWNLINK_DISTANCE   (UPLINK_DISTANCE)

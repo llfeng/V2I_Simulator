@@ -36,6 +36,7 @@
 #include "common.h"
 #include "log.h"
 #include "is_available.h"
+#include "lambertian.h"
 
 using namespace std;
 
@@ -284,7 +285,7 @@ void send_to_proxy(tag_t *tag){
     rsp->type = DATA;
     rsp->sign_type = tag->sign_type;
     
-    tag->busy_time = rsp->start_time + (rsp->plen << 3) * 1000/UPLINK_BITRATE;
+    tag->busy_time = rsp->start_time + (rsp->plen << 3) * 1000/UPLINK_BITRATE + PREAMBLE_TIME;
 
     int sent_bytes = write(tag->conn, (char *)rsp, sizeof(tag_response_t));
     free(rsp);
@@ -328,7 +329,7 @@ int is_silent(tag_t *tag, int reader_addr){
     return 0;
 }
 
-#define FADE_TIMEOUT    5000
+#define FADE_TIMEOUT    10000
 
 void check_alias(tag_t *tag, int cur_time){
     for(int i = 0; i < tag->alias_num; i++){
@@ -504,6 +505,15 @@ int in_range(reader_request_t *reader_request, tag_t *tag){
     double delta_y = reader_request->posy - tag->posy;
     double distance = sqrt(pow(delta_x, 2) + pow(delta_y, 2));
     double degree = atan(fabs(delta_y)/fabs(delta_x));
+
+
+#if 1
+    if(is_connected(distance, cos(degree), g_com_dist_down, g_sys_fov)){
+        return 1;
+    }else{
+        return 0;
+    }
+#else
     if(distance < g_com_dist_down && degree < g_sys_fov && delta_x < 0){
         if(be_blocked(reader_request, tag)){
             return 0;
@@ -519,13 +529,10 @@ int in_range(reader_request_t *reader_request, tag_t *tag){
         }
     }else{
         return 0;
-    }   
+    }
+#endif    
 }
 
-typedef struct{
-    double posx;
-    int type;
-} sign_info_t;
 
 void *tag_thread(void *arg){
 	tag_t *tag = create_tag();
@@ -633,11 +640,9 @@ void send_to_tag(tag_info_t *tag_info, char *buf, int buflen){
 
 
 void *tag_proxy(void *arg){
-    double tag_pos[TAG_MAX_NUM];
     sign_info_t sign_info[TAG_MAX_NUM];
 
-    memset(tag_pos, 0, sizeof(tag_pos));
-    memset(sign_info, 0, sizeof(sign_info_t));
+    memset(sign_info, 0, sizeof(sign_info));
 
     int tag_conn[TAG_MAX_NUM];
 
@@ -652,7 +657,11 @@ void *tag_proxy(void *arg){
         sign_info[tag_index].type = LARGE_SIGN;
         tag_index++;
 
+#if RANDOM_INSERT_TAG
         int internal_tag_num = random()%EACH_SPACING_MAX_TAG_NUM;
+#else
+        int internal_tag_num = 0;
+#endif
         double insert_tag[10];
         int insert_count = 0;
         for(int j = 0; j < internal_tag_num; j++){
@@ -688,7 +697,7 @@ void *tag_proxy(void *arg){
 //    char tag_num_str[32];
 //    sprintf(tag_num_str, "%d", tag_num);
 //    write(remote_serverfd, tag_num_str, )
-    write(remote_conn, tag_pos, sizeof(tag_pos));
+    write(remote_conn, sign_info, sizeof(sign_info));
 
 
     printf("tag_proxy init ok\n");
