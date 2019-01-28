@@ -19,10 +19,6 @@ def fetch_data(filename):
         item_count = item_count + 1
         pos_item = line.split(',')
         if float(pos_item[3]) > float(pos_item[1]):
-#            com_x_left = math.sqrt(pow(g_com_dist_up, 2) - pow(float(pos_item[2]),2));
-#            com_x_right = float(pos_item[2]) / math.tan(g_sys_fov);
-#            com_dist = com_x_left-com_x_right
-#            remain_dist = float(pos_item[3]) - float(pos_item[1]) - com_x_right
             com_dist = float(pos_item[5])
             remain_dist = float(pos_item[6])
 
@@ -41,19 +37,22 @@ def list_average(num):
 
 
 
-def fetch_result(lane, velocity, spacing):
+def fetch_result(random, bps, lane, velocity, spacing):
     res_RTB = []
     res_RDB = []
     res_fail_count = 0
     res_item_count = 0
-    dir_name = "lane"+str(lane)+"_velocity"+str(velocity)+"_spacing"+str(spacing)
-    fname = dir_name+".csv"
+#    dir_name = "lane"+str(lane)+"_velocity"+str(velocity)+"_spacing"+str(spacing)
+
+    key = "random"+str(random)+"_bps"+str(bps)+"_lane"+str(lane)+"_velocity"+str(velocity)+"_spacing"+str(spacing)
+    suffix = ".csv"
+    fname = key+suffix
+
     list_dirs = os.walk(".") 
     for root, dirs, files in list_dirs: 
         for file_item in files:
             if file_item.find(fname) >= 0:
-#                print file_item
-                RTB, RDB, fail_count, item_count= fetch_data(dir_name+"/"+file_item)
+                RTB, RDB, fail_count, item_count= fetch_data(os.path.join(dir_name,file_item))
                 res_RTB = res_RTB + RTB
                 res_RDB = res_RDB + RDB
                 res_fail_count = res_fail_count + fail_count
@@ -63,6 +62,9 @@ def fetch_result(lane, velocity, spacing):
 velocity = [30, 50, 70]
 spacing = [100, 500, 1000]
 
+random_tbl = [0, 1]
+bps_tbl = [128, 256]
+
 '''
 fetch_data("/home/llfeng/VLC/simulator/RetroI2V_MAC/USE_ROUND/root/lane1_velocity2_spacing100/result-2019-01-26_23_35_39_lane1_velocity2_spacing100.csv")
 
@@ -71,18 +73,18 @@ ave_RDB = 0.0
 fail_count = 0
 total_count = 0
 res_dict = {}
-for i in range(1, 4):   #lane: 1,2,3
-    for j in range (0, 3):  #velocity: 0,1,2
-        for k in spacing:
-#            print(i,j,k)
-#            ave_RDB, fail_count, total_count = fetch_result(i,j,k)
-            item_key = "lane"+str(i)+"_velocity"+str(velocity[j])+"_spacing"+str(k)
-            item_val = fetch_result(i,j,k)
-            res_dict[item_key] = item_val
+for random in random_tbl:
+    for bps in bps_tbl:
+        for i in range(1, 4):   #lane: 1,2,3
+            for j in range (0, 3):  #velocity: 0,1,2
+                for k in spacing:
+                    item_key = "random"+random+"_bps"+bps+"_lane"+str(i)+"_velocity"+str(velocity[j])+"_spacing"+str(k)
+                    item_val = fetch_result(random,bps,i,j,k)
+                    res_dict[item_key] = item_val
+
 data=DataFrame(res_dict)
 data.to_csv("data.csv", index=False)
 print data
-#print(res_dict)
 
 
 
