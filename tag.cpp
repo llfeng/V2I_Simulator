@@ -382,7 +382,7 @@ void parse_downlink(tag_t *tag, reader_request_t *req){     //mac
                 ack_round = round;
             }else{
                 printf("unknown frame_state!\n");
-                while(1);
+//                while(1);
             }
             for(int i = 0; i < tag->alias_num; i++){
                 if(tag->alias[i].round == ack_round &&
@@ -586,7 +586,7 @@ void *tag_thread(void *arg){
                 lights.push_back(Point(x, y));
                 if(tag->posx < 100){
                     printf("ERROR HERE!\n");
-                    while(1);
+//                    while(1);
                 }
                 if((req_bat->req[i].type == REAL_SENT) && in_range(&req_bat->req[i], tag)){
                     double cur_posx = req_bat->req[i].posx + (req_bat->req[i].start_time - req_bat->req[i].init_time + (double)(req_bat->req[i].plen<<3)*1000/DOWNLINK_BITRATE) * req_bat->req[i].velocity;

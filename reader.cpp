@@ -401,9 +401,11 @@ void record_log(reader_t *reader, tag_response_t *tag_response){
 #else
     double com_x_left, com_x_right;
     if(get_xaxis_range(reader->posy, tag_response->posx, tag_response->posy, g_com_dist_up[tag_response->sign_type], com_x_left, com_x_right) < 0){
+/*
         while(1){
             printf("[%s]---ERROR HERE!\n", __func__);
         }
+*/        
     }
     printf("l:%f, r:%f\n", com_x_left, com_x_right);
 #endif
@@ -759,7 +761,7 @@ reader_request_t *gen_reader_request(reader_t *reader){
     reader_request_t *reader_request = (reader_request_t *)malloc(sizeof(reader_request_t));
     if(!reader_request){
         LOG(FATAL, "MEM ERR");
-        while(1);
+//        while(1);
     }
     reader_request->conn = -1;
     reader_request->addr = reader->addr;
@@ -822,7 +824,7 @@ void send_reader_request_to_reader_proxy(reader_t *reader){
     reader_request = gen_reader_request(reader);    
     if(!reader_request){
         LOG(FATAL, "MEM ERR!");
-        while(1);
+//        while(1);
     }
    // LOG(INFO, "[%d]---velocity:%f, start_time:%d", reader->conn, reader_request->velocity, reader_request->start_time);
     int sendlen = write(reader->conn, (char *)reader_request, sizeof(reader_request_t));
@@ -1010,7 +1012,7 @@ void do_handler(req_bat_t *sent_req_bat,
         to_reader_rsp_bat = (rsp_bat_t *)malloc(sizeof(rsp_bat_t));
         if(!to_reader_rsp_bat){
             LOG(FATAL, "MEM ERR");
-            while(1);
+//            while(1);
         }
         to_reader_rsp_bat->num = 0;
         to_reader_rsp_bat->sent = 1;
@@ -1067,7 +1069,7 @@ void do_handler(req_bat_t *sent_req_bat,
         to_reader_rsp_bat = (rsp_bat_t *)malloc(sizeof(rsp_bat_t));
         if(!to_reader_rsp_bat){
             LOG(FATAL, "MEM ERR");
-            while(1);
+//            while(1);
         }
         to_reader_rsp_bat->num = 0;
         to_reader_rsp_bat->sent = 0;
@@ -1256,7 +1258,7 @@ void *reader_proxy(void *arg){
 
     free(ready_req_bat);
     free(sent_req_bat);
-    free(rsp_bat_t *rsp_bat);
+    free(rsp_bat);
 
 }
 
