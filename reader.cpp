@@ -1045,11 +1045,13 @@ void do_handler(req_bat_t *sent_req_bat,
                     memcpy((char *)&(to_reader_rsp_bat->rsp[to_reader_rsp_bat->num++]), (char *)&(rsp_bat->rsp[j]), sizeof(tag_response_t)); 
                 }else{
                     LOG(INFO, "sent-reader[%3d]  is [in-view but intersect]. reader(%3f, %3f)<----tag(%3f, %3f), rsp_start_time:%10d, receive data:%s", sent_req_bat->req[i].addr, x, y, rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy, rsp_bat->rsp[j].start_time, p_str);                
+#if 0                    
                     while(lights.size()){
                         Point a = lights.back();
                         lights.pop_back();
                         printf("(%f, %f)\n", a.x, a.y);
                     }
+#endif                    
                 }
             }else{
 //                LOG(INFO, "sent-reader[%3d]  is [out-view]. reader(%3d, %3d)<----tag(%3d, %3d), rsp_start_time:%10d, receive data:%s", sent_req_bat->req[i].addr, x, y, rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy, rsp_bat->rsp[j].start_time, p_str);
@@ -1099,11 +1101,13 @@ void do_handler(req_bat_t *sent_req_bat,
                     memcpy((char *)&(to_reader_rsp_bat->rsp[to_reader_rsp_bat->num++]), (char *)&(rsp_bat->rsp[j]), sizeof(tag_response_t)); 
                 }else{
                     LOG(INFO, "ready-reader[%3d] is [in-view but intersect]. reader(%3f, %3f)<----tag(%3f, %3f), rsp_start_time:%10d, receive data:%s", ready_req_bat->req[i].addr, x, y, rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy, rsp_bat->rsp[j].start_time, p_str);
+#if 0                    
                     while(lights.size()){
                         Point a = lights.back();
                         lights.pop_back();
                         printf("(%f, %f)\n", a.x, a.y);
                     }
+#endif                    
                 }
             }else{
 //                LOG(INFO, "ready-reader[%3d] is [out-view]. reader(%3d, %3d)<----tag(%3d, %3d), rsp_start_time:%10d, receive data:%s", sent_req_bat->req[i].addr, x, y, rsp_bat->rsp[j].posx, rsp_bat->rsp[j].posy, rsp_bat->rsp[j].start_time, p_str);
