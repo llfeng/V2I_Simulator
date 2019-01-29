@@ -1226,6 +1226,7 @@ void *reader_proxy(void *arg){
             //send to tag proxy 
             //write(remote_clientfd, (char *)sent_req_bat, sizeof(req_bat_t));
             write(remote_clientfd, (char *)to_tag_proxy_req_bat, sizeof(req_bat_t));
+            free(to_tag_proxy_req_bat);
             //receive from tag proxy
             int readlen = read(remote_clientfd, (char *)rsp_bat, sizeof(rsp_bat_t));
 
@@ -1252,6 +1253,10 @@ void *reader_proxy(void *arg){
 
     close(local_serverfd);
     close(remote_clientfd);
+
+    free(ready_req_bat);
+    free(sent_req_bat);
+    free(rsp_bat_t *rsp_bat);
 
 }
 

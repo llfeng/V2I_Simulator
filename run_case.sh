@@ -7,11 +7,14 @@
 
 
 ./work_range.sh
+sleep 1
 
 ./road_traffic.sh
 
-./tag_density.sh
+sleep 1
 
+./tag_density.sh
+sleep 1
 
 #./trace $1 $2 $3&
 #sleep 1

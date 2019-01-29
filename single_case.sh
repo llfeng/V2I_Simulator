@@ -5,10 +5,18 @@ velocity=$2
 interval=$3
 
 
-		    for((m=1;m<=100;m++)); 
+		    for((m=1;m<=20;m++)); 
 		    do
 		        ./tag $interval &
 		        sleep 1
+                readerpid=`ps -ef|grep reader|grep -v grep|wc -l`
+                while [ $readerpid -gt 500 ]
+                do
+                    sleep 1
+                    readerpid=`ps -ef|grep reader|grep -v grep|wc -l`
+                    echo "readerpid:" $readerpid
+                done
+                echo "./reader" $lane_num $velocity $interval
 		        ./reader $lane_num $velocity $interval 
 		        sleep 1
 		    done

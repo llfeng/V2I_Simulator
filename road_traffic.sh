@@ -6,9 +6,9 @@
 #done
 
 
-for((velocity=1;velocity<=3;velocity++));   #velocity
+for((velocity=0;velocity<=2;velocity++));   #velocity
 do
-	for((lane_num=${velocity};lane_num<=${velocity};lane_num++));   #lane num
+	for((lane_num=$velocity;lane_num<=$velocity;lane_num++));   #lane num
 	do
 	    for((k=1;k<=3;k++));   #tag interval
 	    do
