@@ -6,8 +6,6 @@ import math
 import fileinput
 
 
-g_com_dist_up = 65.0
-g_sys_fov = 20.0/2
 
 
 def fetch_data(filename):

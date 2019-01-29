@@ -5,7 +5,7 @@ velocity=$2
 interval=$3
 
 
-		    for((m=1;m<=10;m++)); 
+		    for((m=1;m<=100;m++)); 
 		    do
 		        ./tag $interval &
 		        sleep 1
